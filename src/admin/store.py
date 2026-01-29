@@ -97,14 +97,22 @@ class AdminConfigStore:
                 # Reconstruct users
                 users = []
                 for u_data in data.get('users', []):
+                    password_hash = u_data.get('password_hash')
+                    requires_password_change = u_data.get('requires_password_change', True)
+                    
+                    # If this is the admin user and has no password, set default password "admin"
+                    if u_data.get('username', u_data.get('email')) == 'admin' and password_hash is None:
+                        password_hash, _ = hash_password("admin")
+                        requires_password_change = True  # Force password change on first login
+                    
                     users.append(User(
                         id=u_data['id'],
                         username=u_data.get('username', u_data.get('email', 'admin')),  # Fallback for migration
                         name=u_data['name'],
                         role=UserRole(u_data['role']),
                         is_active=u_data.get('is_active', True),
-                        password_hash=u_data.get('password_hash'),
-                        requires_password_change=u_data.get('requires_password_change', True),
+                        password_hash=password_hash,
+                        requires_password_change=requires_password_change,
                         email=u_data.get('email'),
                         created_at=datetime.fromisoformat(u_data['created_at']) if u_data.get('created_at') else datetime.utcnow(),
                         last_login=datetime.fromisoformat(u_data['last_login']) if u_data.get('last_login') else None,
@@ -117,13 +125,19 @@ class AdminConfigStore:
                     except ValueError:
                         pass
                 
-                return PlatformConfig(
+                config = PlatformConfig(
                     llm_providers=llm_providers or self._build_default_config().llm_providers,
                     active_llm_provider=active_provider,
                     data_sources=data_sources or self._build_default_config().data_sources,
                     default_data_source_level=DataSourceLevel(data.get('default_data_source_level', 'public_only')),
                     users=users or self._build_default_config().users,
                 )
+                
+                # Save config if we made any updates (like setting default password)
+                self._config = config
+                self._save_config()
+                
+                return config
         except Exception as e:
             print(f"Warning: Could not load admin config: {e}")
         return None
@@ -262,7 +276,8 @@ class AdminConfigStore:
             ),
         ]
         
-        # Single initial admin user (password must be set on first login)
+        # Single initial admin user with default password "admin" - must change on first login
+        default_password_hash, _ = hash_password("admin")
         default_users = [
             User(
                 id="user-admin-001",
@@ -270,8 +285,8 @@ class AdminConfigStore:
                 name="Administrator",
                 role=UserRole.ADMIN,
                 is_active=True,
-                password_hash=None,  # Must set password on first login
-                requires_password_change=True,
+                password_hash=default_password_hash,  # Default password: admin
+                requires_password_change=True,  # Force password change on first login
             ),
         ]
         

@@ -1,6 +1,6 @@
 import { Fragment, useState } from 'react'
-import { Outlet, Link, useLocation } from 'react-router-dom'
-import { Dialog, Transition } from '@headlessui/react'
+import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom'
+import { Dialog, Transition, Menu } from '@headlessui/react'
 import {
   Bars3Icon,
   HomeIcon,
@@ -16,8 +16,11 @@ import {
   LightBulbIcon,
   TrophyIcon,
   BookOpenIcon,
+  ArrowRightOnRectangleIcon,
+  ChevronDownIcon,
 } from '@heroicons/react/24/outline'
 import { motion } from 'framer-motion'
+import { useAuth } from '../context/AuthContext'
 
 const navigation = [
   { name: 'Dashboard', href: '/dashboard', icon: HomeIcon },
@@ -42,6 +45,30 @@ function classNames(...classes: string[]) {
 export function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const location = useLocation()
+  const navigate = useNavigate()
+  const { user, logout } = useAuth()
+
+  const handleLogout = () => {
+    logout()
+    navigate('/login')
+  }
+
+  // Get user initials for avatar
+  const userInitials = user?.name
+    ?.split(' ')
+    .map(n => n[0])
+    .join('')
+    .toUpperCase()
+    .slice(0, 2) || 'U'
+
+  // Get role display name
+  const roleDisplayName = user?.role === 'admin' 
+    ? 'Administrator' 
+    : user?.role === 'executive' 
+    ? 'Executive'
+    : user?.role === 'sales_leader'
+    ? 'Sales Leader'
+    : 'Analyst'
 
   return (
     <div className="h-full gradient-mesh">
@@ -167,16 +194,52 @@ export function Layout() {
               </h1>
             </div>
             <div className="flex items-center gap-x-4">
-              {/* User menu */}
-              <div className="flex items-center gap-3">
-                <div className="text-right">
-                  <p className="text-sm font-medium text-white">Demo User</p>
-                  <p className="text-xs text-slate-400">Executive</p>
-                </div>
-                <div className="h-9 w-9 rounded-full bg-gradient-to-br from-brand-500 to-accent-500 flex items-center justify-center text-white text-sm font-semibold">
-                  DU
-                </div>
-              </div>
+              {/* User menu with dropdown */}
+              <Menu as="div" className="relative">
+                <Menu.Button className="flex items-center gap-3 hover:bg-white/5 rounded-lg p-2 transition-colors">
+                  <div className="text-right">
+                    <p className="text-sm font-medium text-white">{user?.name || 'User'}</p>
+                    <p className="text-xs text-slate-400">{roleDisplayName}</p>
+                  </div>
+                  <div className="h-9 w-9 rounded-full bg-gradient-to-br from-brand-500 to-accent-500 flex items-center justify-center text-white text-sm font-semibold">
+                    {userInitials}
+                  </div>
+                  <ChevronDownIcon className="h-4 w-4 text-slate-400" />
+                </Menu.Button>
+                
+                <Transition
+                  as={Fragment}
+                  enter="transition ease-out duration-100"
+                  enterFrom="transform opacity-0 scale-95"
+                  enterTo="transform opacity-100 scale-100"
+                  leave="transition ease-in duration-75"
+                  leaveFrom="transform opacity-100 scale-100"
+                  leaveTo="transform opacity-0 scale-95"
+                >
+                  <Menu.Items className="absolute right-0 mt-2 w-56 origin-top-right rounded-xl bg-slate-800 border border-white/10 shadow-xl shadow-black/25 focus:outline-none overflow-hidden">
+                    <div className="px-4 py-3 border-b border-white/10">
+                      <p className="text-sm font-medium text-white">{user?.name}</p>
+                      <p className="text-xs text-slate-400">@{user?.username}</p>
+                    </div>
+                    <div className="py-1">
+                      <Menu.Item>
+                        {({ active }) => (
+                          <button
+                            onClick={handleLogout}
+                            className={classNames(
+                              active ? 'bg-white/5' : '',
+                              'flex w-full items-center gap-3 px-4 py-2 text-sm text-red-400 hover:text-red-300'
+                            )}
+                          >
+                            <ArrowRightOnRectangleIcon className="h-5 w-5" />
+                            Sign out
+                          </button>
+                        )}
+                      </Menu.Item>
+                    </div>
+                  </Menu.Items>
+                </Transition>
+              </Menu>
             </div>
           </div>
         </div>
