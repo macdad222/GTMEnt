@@ -426,42 +426,100 @@ const RiskMatrixChart = () => {
         <ShieldExclamationIcon className="h-5 w-5 text-red-400" />
         Risk Assessment Matrix
       </h3>
-      <div className="grid grid-cols-5 gap-2 mb-4">
-        {[5, 4, 3, 2, 1].map(impact => (
-          <React.Fragment key={impact}>
-            {[1, 2, 3, 4, 5].map(likelihood => {
-              const risk = riskMatrix.find(r => r.likelihood === likelihood && r.impact === impact)
-              const severity = likelihood * impact
-              const bgColor = severity >= 15 ? 'bg-red-500/40' : severity >= 8 ? 'bg-amber-500/30' : 'bg-emerald-500/20'
-              
-              return (
-                <div
-                  key={`${likelihood}-${impact}`}
-                  className={`h-12 rounded ${bgColor} flex items-center justify-center text-xs relative group`}
-                >
-                  {risk && (
-                    <>
-                      <div className={`w-3 h-3 rounded-full`} style={{ backgroundColor: riskColors[risk.category] }} />
-                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-slate-900 rounded text-xs whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity z-10">
-                        {risk.risk}
-                      </div>
-                    </>
-                  )}
-                </div>
-              )
-            })}
-          </React.Fragment>
-        ))}
-      </div>
-      <div className="flex items-center justify-between text-xs text-slate-400">
-        <span>Likelihood →</span>
-        <div className="flex gap-4">
-          {Object.entries(riskColors).map(([cat, color]) => (
-            <div key={cat} className="flex items-center gap-1">
-              <div className="w-2 h-2 rounded-full" style={{ backgroundColor: color }} />
-              <span>{cat}</span>
+      
+      {/* Matrix with axis labels */}
+      <div className="flex">
+        {/* Y-Axis Label */}
+        <div className="flex flex-col justify-center mr-2">
+          <div className="transform -rotate-90 whitespace-nowrap text-xs font-medium text-slate-400 tracking-wider">
+            IMPACT →
+          </div>
+        </div>
+        
+        {/* Y-Axis Values */}
+        <div className="flex flex-col justify-around mr-2 py-1">
+          {[5, 4, 3, 2, 1].map(val => (
+            <div key={val} className="h-12 flex items-center justify-center text-xs text-slate-500 font-medium">
+              {val}
             </div>
           ))}
+        </div>
+        
+        {/* Matrix Grid */}
+        <div className="flex-1">
+          <div className="grid grid-cols-5 gap-2">
+            {[5, 4, 3, 2, 1].map(impact => (
+              <React.Fragment key={impact}>
+                {[1, 2, 3, 4, 5].map(likelihood => {
+                  const risk = riskMatrix.find(r => r.likelihood === likelihood && r.impact === impact)
+                  const severity = likelihood * impact
+                  const bgColor = severity >= 15 ? 'bg-red-500/40' : severity >= 8 ? 'bg-amber-500/30' : 'bg-emerald-500/20'
+                  
+                  return (
+                    <div
+                      key={`${likelihood}-${impact}`}
+                      className={`h-12 rounded ${bgColor} flex items-center justify-center text-xs relative group cursor-pointer hover:ring-2 hover:ring-white/30 transition-all`}
+                    >
+                      {risk && (
+                        <>
+                          <div className={`w-3 h-3 rounded-full`} style={{ backgroundColor: riskColors[risk.category] }} />
+                          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-1.5 bg-slate-900 rounded-lg text-xs whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity z-10 shadow-lg border border-slate-700">
+                            <span className="font-medium text-white">{risk.risk}</span>
+                            <span className="text-slate-400 ml-1">({risk.category})</span>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )
+                })}
+              </React.Fragment>
+            ))}
+          </div>
+          
+          {/* X-Axis Values */}
+          <div className="grid grid-cols-5 gap-2 mt-2">
+            {[1, 2, 3, 4, 5].map(val => (
+              <div key={val} className="text-center text-xs text-slate-500 font-medium">
+                {val}
+              </div>
+            ))}
+          </div>
+          
+          {/* X-Axis Label */}
+          <div className="text-center mt-2 text-xs font-medium text-slate-400 tracking-wider">
+            LIKELIHOOD →
+          </div>
+        </div>
+      </div>
+      
+      {/* Legend */}
+      <div className="mt-6 pt-4 border-t border-slate-700/50">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          {/* Risk Categories */}
+          <div className="flex flex-wrap gap-3">
+            {Object.entries(riskColors).map(([cat, color]) => (
+              <div key={cat} className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-slate-800/50">
+                <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: color }} />
+                <span className="text-xs text-slate-300">{cat}</span>
+              </div>
+            ))}
+          </div>
+          
+          {/* Severity Legend */}
+          <div className="flex items-center gap-3 text-xs">
+            <div className="flex items-center gap-1.5">
+              <div className="w-4 h-3 rounded bg-emerald-500/20"></div>
+              <span className="text-slate-400">Low</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <div className="w-4 h-3 rounded bg-amber-500/30"></div>
+              <span className="text-slate-400">Medium</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <div className="w-4 h-3 rounded bg-red-500/40"></div>
+              <span className="text-slate-400">High</span>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -1127,105 +1185,234 @@ export function StrategyReport() {
             </motion.div>
           )}
 
-          {/* Key Insights */}
+          {/* Key Insights - Premium Design */}
           {report.key_insights.length > 0 && (
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.2 }}
-              className="p-6 rounded-2xl bg-slate-800/50 border border-slate-700/50"
+              className="rounded-2xl overflow-hidden"
             >
-              <div className="flex items-center gap-3 mb-6">
-                <div className="p-2 rounded-lg bg-amber-500/20">
-                  <LightBulbIcon className="h-6 w-6 text-amber-400" />
+              {/* Header with gradient background */}
+              <div className="px-8 py-6 bg-gradient-to-r from-amber-600/20 via-orange-600/10 to-transparent border-b border-amber-500/20">
+                <div className="flex items-center gap-4">
+                  <div className="p-3 rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 shadow-lg shadow-amber-500/30">
+                    <LightBulbIcon className="h-7 w-7 text-white" />
+                  </div>
+                  <div>
+                    <h2 className="text-2xl font-bold text-white">Key Strategic Insights</h2>
+                    <p className="text-amber-200/70 text-sm mt-0.5">{report.key_insights.length} critical findings from comprehensive analysis</p>
+                  </div>
                 </div>
-                <h2 className="text-xl font-bold text-white">Key Insights</h2>
               </div>
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {report.key_insights.map((insight, index) => (
-                  <motion.div
-                    key={index}
-                    initial={{ opacity: 0, scale: 0.95 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    transition={{ delay: 0.3 + index * 0.1 }}
-                    className="p-5 rounded-xl bg-gradient-to-br from-slate-700/50 to-slate-800/50 border border-slate-600/50 hover:border-amber-500/30 transition-colors"
-                  >
-                    <div className="flex items-start gap-3">
-                      <span className="flex-shrink-0 flex items-center justify-center h-8 w-8 rounded-full bg-amber-500 text-white font-bold text-sm">
-                        {index + 1}
-                      </span>
-                      <div>
-                        <h4 className="font-semibold text-white">{insight.title}</h4>
-                        <p className="mt-2 text-sm text-slate-400">{insight.description}</p>
-                        <span className={`mt-3 inline-block px-2 py-0.5 rounded-full text-xs ${
-                          insight.impact === 'high' 
-                            ? 'bg-red-500/20 text-red-300' 
-                            : insight.impact === 'medium'
-                            ? 'bg-amber-500/20 text-amber-300'
-                            : 'bg-green-500/20 text-green-300'
-                        }`}>
-                          {insight.impact} impact
-                        </span>
-                      </div>
-                    </div>
-                  </motion.div>
-                ))}
+              
+              {/* Insights Grid */}
+              <div className="p-6 bg-slate-800/30 border border-slate-700/50 border-t-0 rounded-b-2xl">
+                <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+                  {report.key_insights.map((insight, index) => {
+                    const impactColors = {
+                      high: { bg: 'from-red-500/20 to-red-600/10', border: 'border-red-500/40', badge: 'bg-red-500', text: 'text-red-300' },
+                      medium: { bg: 'from-amber-500/20 to-amber-600/10', border: 'border-amber-500/40', badge: 'bg-amber-500', text: 'text-amber-300' },
+                      low: { bg: 'from-emerald-500/20 to-emerald-600/10', border: 'border-emerald-500/40', badge: 'bg-emerald-500', text: 'text-emerald-300' },
+                    }
+                    const colors = impactColors[insight.impact as keyof typeof impactColors] || impactColors.medium
+                    
+                    return (
+                      <motion.div
+                        key={index}
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.3 + index * 0.08 }}
+                        className={`group relative p-5 rounded-xl bg-gradient-to-br ${colors.bg} border ${colors.border} hover:scale-[1.02] transition-all duration-300 cursor-default`}
+                      >
+                        {/* Insight Number */}
+                        <div className="absolute -top-3 -left-2">
+                          <span className={`flex items-center justify-center h-8 w-8 rounded-lg ${colors.badge} text-white font-bold text-sm shadow-lg`}>
+                            {index + 1}
+                          </span>
+                        </div>
+                        
+                        {/* Category Badge */}
+                        {insight.category && (
+                          <div className="absolute top-3 right-3">
+                            <span className="px-2 py-0.5 rounded-md bg-slate-700/70 text-slate-300 text-[10px] uppercase tracking-wider font-medium">
+                              {insight.category}
+                            </span>
+                          </div>
+                        )}
+                        
+                        <div className="pt-2">
+                          <h4 className="font-semibold text-white text-lg leading-tight pr-16 group-hover:text-amber-100 transition-colors">
+                            {insight.title}
+                          </h4>
+                          {/* Description as formatted bullets */}
+                          <div className="mt-3">
+                            <ul className="space-y-1.5">
+                              {insight.description
+                                .replace(/\*\*/g, '') // Remove bold markers
+                                .replace(/\*/g, '') // Remove italic markers
+                                .split(/[;—]/)
+                                .filter((item: string) => item.trim().length > 5)
+                                .slice(0, 3) // Limit to 3 bullets for cards
+                                .map((item: string, i: number) => (
+                                  <li key={i} className="flex items-start gap-2 text-sm text-slate-300">
+                                    <span className="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-amber-400 mt-1.5"></span>
+                                    <span className="leading-relaxed">{item.trim()}</span>
+                                  </li>
+                                ))}
+                            </ul>
+                          </div>
+                          
+                          {/* Impact indicator */}
+                          <div className="mt-4 pt-3 border-t border-slate-700/50 flex items-center justify-between">
+                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${colors.text} bg-slate-800/50`}>
+                              <span className={`w-1.5 h-1.5 rounded-full ${colors.badge}`}></span>
+                              {insight.impact.charAt(0).toUpperCase() + insight.impact.slice(1)} Impact
+                            </span>
+                          </div>
+                        </div>
+                      </motion.div>
+                    )
+                  })}
+                </div>
               </div>
             </motion.div>
           )}
 
-          {/* Strategic Recommendations */}
+          {/* Strategic Recommendations - Premium Design */}
           {report.strategic_recommendations.length > 0 && (
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.3 }}
-              className="p-6 rounded-2xl bg-slate-800/50 border border-slate-700/50"
+              className="rounded-2xl overflow-hidden"
             >
-              <div className="flex items-center gap-3 mb-6">
-                <div className="p-2 rounded-lg bg-emerald-500/20">
-                  <RocketLaunchIcon className="h-6 w-6 text-emerald-400" />
+              {/* Header with gradient background */}
+              <div className="px-8 py-6 bg-gradient-to-r from-emerald-600/20 via-teal-600/10 to-transparent border-b border-emerald-500/20">
+                <div className="flex items-center gap-4">
+                  <div className="p-3 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 shadow-lg shadow-emerald-500/30">
+                    <RocketLaunchIcon className="h-7 w-7 text-white" />
+                  </div>
+                  <div>
+                    <h2 className="text-2xl font-bold text-white">Strategic Recommendations</h2>
+                    <p className="text-emerald-200/70 text-sm mt-0.5">Prioritized action plan for accelerated growth</p>
+                  </div>
                 </div>
-                <h2 className="text-xl font-bold text-white">Strategic Recommendations</h2>
               </div>
-              <div className="space-y-4">
-                {report.strategic_recommendations.map((rec, index) => (
-                  <motion.div
-                    key={index}
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: 0.4 + index * 0.1 }}
-                    className="p-5 rounded-xl bg-gradient-to-r from-slate-700/30 to-transparent border-l-4 border-emerald-500 hover:bg-slate-700/50 transition-colors"
-                  >
-                    <div className="flex items-start gap-4">
-                      <div className="flex-shrink-0">
-                        <span className={`flex items-center justify-center h-10 w-10 rounded-xl text-white font-bold ${
-                          rec.priority === 1 ? 'bg-red-500' : rec.priority === 2 ? 'bg-amber-500' : 'bg-emerald-500'
-                        }`}>
-                          P{rec.priority}
-                        </span>
-                      </div>
-                      <div className="flex-1">
-                        <h4 className="font-semibold text-white text-lg">{rec.title}</h4>
-                        <p className="mt-2 text-slate-400">{rec.description}</p>
-                        <div className="mt-3 flex items-center gap-4 text-sm">
-                          <span className="inline-flex items-center gap-1 text-slate-500">
-                            <ClockIcon className="h-4 w-4" />
-                            {rec.timeline}
-                          </span>
-                          <span className={`inline-flex items-center gap-1 ${
-                            rec.expected_impact.toLowerCase().includes('high')
-                              ? 'text-emerald-400'
-                              : 'text-slate-400'
-                          }`}>
-                            <ChartBarIcon className="h-4 w-4" />
-                            {rec.expected_impact} Impact
-                          </span>
+              
+              {/* Recommendations List */}
+              <div className="p-6 bg-slate-800/30 border border-slate-700/50 border-t-0 rounded-b-2xl">
+                <div className="space-y-5">
+                  {report.strategic_recommendations.map((rec, index) => {
+                    const priorityConfig = {
+                      1: { 
+                        gradient: 'from-red-500/10 via-red-600/5 to-transparent', 
+                        border: 'border-l-red-500',
+                        badge: 'bg-gradient-to-r from-red-500 to-rose-600',
+                        label: 'Critical',
+                        glow: 'shadow-red-500/20'
+                      },
+                      2: { 
+                        gradient: 'from-amber-500/10 via-amber-600/5 to-transparent', 
+                        border: 'border-l-amber-500',
+                        badge: 'bg-gradient-to-r from-amber-500 to-orange-600',
+                        label: 'High',
+                        glow: 'shadow-amber-500/20'
+                      },
+                      3: { 
+                        gradient: 'from-emerald-500/10 via-emerald-600/5 to-transparent', 
+                        border: 'border-l-emerald-500',
+                        badge: 'bg-gradient-to-r from-emerald-500 to-teal-600',
+                        label: 'Medium',
+                        glow: 'shadow-emerald-500/20'
+                      },
+                    }
+                    const config = priorityConfig[rec.priority as keyof typeof priorityConfig] || priorityConfig[3]
+                    
+                    return (
+                      <motion.div
+                        key={index}
+                        initial={{ opacity: 0, x: -30 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: 0.4 + index * 0.1 }}
+                        className={`group relative p-6 rounded-xl bg-gradient-to-r ${config.gradient} border-l-4 ${config.border} border border-slate-700/30 hover:border-slate-600/50 transition-all duration-300`}
+                      >
+                        <div className="flex items-start gap-5">
+                          {/* Priority Badge */}
+                          <div className="flex-shrink-0">
+                            <div className={`flex flex-col items-center justify-center h-16 w-16 rounded-xl ${config.badge} shadow-lg ${config.glow}`}>
+                              <span className="text-white text-xs font-medium opacity-80">Priority</span>
+                              <span className="text-white text-2xl font-bold">{rec.priority}</span>
+                            </div>
+                          </div>
+                          
+                          {/* Content */}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-start justify-between gap-4">
+                              <h4 className="font-bold text-white text-lg leading-tight group-hover:text-emerald-100 transition-colors">
+                                {rec.title}
+                              </h4>
+                              <span className={`flex-shrink-0 px-2.5 py-1 rounded-full text-xs font-medium text-white ${config.badge}`}>
+                                {config.label}
+                              </span>
+                            </div>
+                            
+                            {/* Description as formatted bullets */}
+                            <div className="mt-3">
+                              <ul className="space-y-2">
+                                {rec.description
+                                  .replace(/\*\*/g, '') // Remove bold markers
+                                  .replace(/\*/g, '') // Remove italic markers
+                                  .split(/[;.]/)
+                                  .filter((item: string) => item.trim().length > 5)
+                                  .slice(0, 4) // Limit to 4 bullets
+                                  .map((item: string, i: number) => (
+                                    <li key={i} className="flex items-start gap-3 text-slate-300">
+                                      <span className="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-emerald-400 mt-2"></span>
+                                      <span className="leading-relaxed">{item.trim()}</span>
+                                    </li>
+                                  ))}
+                              </ul>
+                            </div>
+                            
+                            {/* Rationale if available and not just placeholder */}
+                            {rec.rationale && rec.rationale !== 'Based on comprehensive analysis' && (
+                              <div className="mt-4 p-4 rounded-lg bg-gradient-to-r from-slate-800/80 to-slate-800/40 border border-slate-700/50">
+                                <div className="flex items-start gap-3">
+                                  <div className="flex-shrink-0 mt-0.5">
+                                    <LightBulbIcon className="h-4 w-4 text-amber-400" />
+                                  </div>
+                                  <div>
+                                    <p className="text-xs font-medium text-amber-400 uppercase tracking-wider mb-1">Strategic Rationale</p>
+                                    <p className="text-sm text-slate-300 leading-relaxed">{rec.rationale}</p>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                            
+                            {/* Metadata Row */}
+                            <div className="mt-4 pt-4 border-t border-slate-700/40 flex flex-wrap items-center gap-4">
+                              <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800/60 text-sm">
+                                <ClockIcon className="h-4 w-4 text-slate-500" />
+                                <span className="text-slate-400">{rec.timeline}</span>
+                              </div>
+                              <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm ${
+                                rec.expected_impact.toLowerCase().includes('high')
+                                  ? 'bg-emerald-500/10 text-emerald-400'
+                                  : rec.expected_impact.toLowerCase().includes('medium')
+                                  ? 'bg-amber-500/10 text-amber-400'
+                                  : 'bg-slate-800/60 text-slate-400'
+                              }`}>
+                                <ChartBarIcon className="h-4 w-4" />
+                                <span>{rec.expected_impact}</span>
+                              </div>
+                            </div>
+                          </div>
                         </div>
-                      </div>
-                    </div>
-                  </motion.div>
-                ))}
+                      </motion.div>
+                    )
+                  })}
+                </div>
               </div>
             </motion.div>
           )}

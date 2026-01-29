@@ -540,6 +540,126 @@ const RecommendationCard: React.FC<{ rec: string; index: number }> = ({ rec, ind
   );
 };
 
+// Parse opportunity string
+interface ParsedOpportunity {
+  title: string;
+  description: string;
+  details: string[];
+}
+
+function parseOpportunity(opp: string): ParsedOpportunity {
+  // Try to parse: "1. **Title**: Description\n- Detail 1\n- Detail 2"
+  const titleMatch = opp.match(/^\d+\.\s*\*?\*?([^*:]+)\*?\*?:\s*(.+?)(?=\n-|\n\*|$)/s);
+  const title = titleMatch ? titleMatch[1].trim() : opp.split(':')[0].replace(/^\d+\.\s*\*?\*?/, '').replace(/\*?\*?$/, '').trim();
+  const description = titleMatch ? titleMatch[2].trim() : opp.split('\n')[0].replace(/^\d+\.\s*\*?\*?[^:]+:\s*/, '').trim();
+  
+  // Extract bullet points
+  const bulletMatches = opp.match(/[-*]\s+\*?\*?([^:]+):\s*(.+)/g) || [];
+  const details = bulletMatches.map(b => b.replace(/^[-*]\s*\*?\*?/, '').trim());
+  
+  return { title, description, details };
+}
+
+// Styled Opportunity Card
+const OpportunityCard: React.FC<{ opp: string; index: number }> = ({ opp, index }) => {
+  const parsed = parseOpportunity(opp);
+  
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: index * 0.1 }}
+      className="p-4 bg-gradient-to-br from-cyan-900/20 to-slate-800/50 rounded-xl border border-cyan-500/20 hover:border-cyan-500/40 transition-all"
+    >
+      <div className="flex items-start gap-3 mb-3">
+        <div className="flex-shrink-0 w-7 h-7 rounded-full bg-gradient-to-br from-cyan-500 to-cyan-600 flex items-center justify-center text-white font-bold text-xs shadow-lg">
+          {index + 1}
+        </div>
+        <h4 className="font-semibold text-cyan-300">{parsed.title}</h4>
+      </div>
+      <p className="text-slate-300 text-sm mb-2">{parsed.description}</p>
+      {parsed.details.length > 0 && (
+        <ul className="space-y-1 ml-2">
+          {parsed.details.map((detail, i) => (
+            <li key={i} className="flex items-start gap-2 text-sm text-slate-400">
+              <span className="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-cyan-400 mt-1.5"></span>
+              <span>{detail}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </motion.div>
+  );
+};
+
+// Parse threat string
+interface ParsedThreat {
+  title: string;
+  details: { label: string; value: string }[];
+}
+
+function parseThreat(threat: string): ParsedThreat {
+  // Try to parse: "1. **Title**: Description\n- **Competitor**: X\n- **Severity**: Y"
+  const titleMatch = threat.match(/^\d+\.\s*\*?\*?([^*:\n]+)\*?\*?:\s*(.+?)(?=\n|$)/);
+  const title = titleMatch 
+    ? `${titleMatch[1].trim()}: ${titleMatch[2].trim().substring(0, 60)}${titleMatch[2].length > 60 ? '...' : ''}`
+    : threat.split('\n')[0].replace(/^\d+\.\s*\*?\*?/, '').replace(/\*?\*?/, '').trim().substring(0, 80);
+  
+  // Extract labeled bullet points
+  const details: { label: string; value: string }[] = [];
+  const bulletMatches = threat.match(/[-*]\s+\*?\*?([^:]+)\*?\*?:\s*(.+)/g) || [];
+  for (const bullet of bulletMatches) {
+    const match = bullet.match(/[-*]\s*\*?\*?([^:*]+)\*?\*?:\s*(.+)/);
+    if (match) {
+      details.push({ label: match[1].trim(), value: match[2].trim() });
+    }
+  }
+  
+  return { title, details };
+}
+
+// Styled Threat Card
+const ThreatCard: React.FC<{ threat: string; index: number }> = ({ threat, index }) => {
+  const parsed = parseThreat(threat);
+  
+  const severityColors: Record<string, string> = {
+    'high': 'text-red-400',
+    'medium': 'text-amber-400',
+    'low': 'text-green-400',
+  };
+  
+  const severityDetail = parsed.details.find(d => d.label.toLowerCase() === 'severity');
+  const severityColor = severityDetail ? (severityColors[severityDetail.value.toLowerCase()] || 'text-red-400') : 'text-red-400';
+  
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: index * 0.1 }}
+      className="p-4 bg-gradient-to-br from-red-900/20 to-slate-800/50 rounded-xl border border-red-500/20 hover:border-red-500/40 transition-all"
+    >
+      <div className="flex items-start gap-3 mb-3">
+        <div className="flex-shrink-0 w-7 h-7 rounded-full bg-gradient-to-br from-red-500 to-red-600 flex items-center justify-center text-white font-bold text-xs shadow-lg">
+          {index + 1}
+        </div>
+        <h4 className={`font-semibold ${severityColor}`}>{parsed.title}</h4>
+      </div>
+      {parsed.details.length > 0 && (
+        <div className="space-y-1 ml-2">
+          {parsed.details.map((detail, i) => (
+            <div key={i} className="flex items-start gap-2 text-sm">
+              <span className="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-red-400 mt-1.5"></span>
+              <span className="text-slate-400">
+                <span className="text-red-300 font-medium">{detail.label}:</span> {detail.value}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </motion.div>
+  );
+};
+
 // Check if text contains a markdown table
 function containsMarkdownTable(text: string): boolean {
   const lines = text.trim().split('\n');
@@ -1693,18 +1813,7 @@ export function CompetitiveIntel() {
                 >
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {currentAnalysis.opportunities.map((opp, i) => (
-                      <motion.div
-                        key={i}
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: i * 0.1 }}
-                        className="p-4 bg-gradient-to-br from-cyan-900/20 to-slate-800/50 rounded-xl border border-cyan-500/20"
-                      >
-                        <div className="flex items-start gap-3">
-                          <CheckCircleSolid className="h-6 w-6 text-cyan-400 flex-shrink-0" />
-                          <p className="text-slate-200">{opp}</p>
-                        </div>
-                      </motion.div>
+                      <OpportunityCard key={i} opp={opp} index={i} />
                     ))}
                   </div>
                 </EnhancedAnalysisSection>
@@ -1720,18 +1829,7 @@ export function CompetitiveIntel() {
                 >
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {currentAnalysis.threats.map((threat, i) => (
-                      <motion.div
-                        key={i}
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: i * 0.1 }}
-                        className="p-4 bg-gradient-to-br from-red-900/20 to-slate-800/50 rounded-xl border border-red-500/20"
-                      >
-                        <div className="flex items-start gap-3">
-                          <ExclamationTriangleIcon className="h-6 w-6 text-red-400 flex-shrink-0" />
-                          <p className="text-slate-200">{threat}</p>
-                        </div>
-                      </motion.div>
+                      <ThreatCard key={i} threat={threat} index={i} />
                     ))}
                   </div>
                 </EnhancedAnalysisSection>

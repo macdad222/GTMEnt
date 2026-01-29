@@ -13,6 +13,7 @@ import {
   TrophyIcon,
   DocumentTextIcon,
   ServerIcon,
+  MicrophoneIcon,
 } from '@heroicons/react/24/outline'
 
 export function Documentation() {
@@ -320,6 +321,59 @@ export function Documentation() {
                 <span className="text-emerald-400 font-medium">With Internal Data:</span>
                 <span className="text-slate-400 ml-1">Actual product attach, revenue by product</span>
               </div>
+            </div>
+          </div>
+
+          {/* Voice AI Agent Advisor */}
+          <div className="p-4 rounded-xl bg-gradient-to-br from-violet-900/30 to-slate-800/50 border border-violet-500/30">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="p-2 rounded-lg bg-violet-500/20">
+                <MicrophoneIcon className="h-5 w-5 text-violet-400" />
+              </div>
+              <h4 className="text-lg font-semibold text-white">Voice AI Agent Advisor</h4>
+              <span className="px-2 py-0.5 text-xs rounded-full bg-violet-500/20 text-violet-300 border border-violet-500/30">New</span>
+            </div>
+            <p className="text-sm text-slate-300 mb-3">
+              Real-time conversational AI assistant powered by xAI's Grok. Ask questions using your voice and receive 
+              immediate spoken responses based on all platform data including market intelligence, competitive analysis, 
+              segment strategies, and MSA insights.
+            </p>
+            <div className="space-y-3 mb-4">
+              <div className="p-3 rounded-lg bg-slate-900/50">
+                <p className="text-sm font-medium text-violet-300 mb-2">How to Use:</p>
+                <ul className="text-xs text-slate-400 space-y-1">
+                  <li>• Click the <span className="text-violet-300">microphone button</span> (bottom-right of any page)</li>
+                  <li>• Wait for "Connecting..." indicator, then the greeting "Hello!"</li>
+                  <li>• Speak your question naturally - the agent responds in real-time</li>
+                  <li>• Interrupt anytime to ask follow-up questions (barge-in supported)</li>
+                </ul>
+              </div>
+              <div className="p-3 rounded-lg bg-slate-900/50">
+                <p className="text-sm font-medium text-violet-300 mb-2">Example Questions:</p>
+                <ul className="text-xs text-slate-400 space-y-1">
+                  <li>• "What's the TAM for enterprise SD-WAN in New York?"</li>
+                  <li>• "Give me a summary of our competitive position against AT&T"</li>
+                  <li>• "What are the growth opportunities in the E3 segment?"</li>
+                  <li>• "Compare Chicago and Philadelphia MSAs for me"</li>
+                  <li>• "What are the top strategic recommendations from our latest analysis?"</li>
+                </ul>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3 text-xs">
+              <div className="p-2 rounded bg-slate-900/50">
+                <span className="text-cyan-400 font-medium">Data Accessed:</span>
+                <span className="text-slate-400 ml-1">All platform data via real-time tool calls</span>
+              </div>
+              <div className="p-2 rounded bg-slate-900/50">
+                <span className="text-violet-400 font-medium">Configuration:</span>
+                <span className="text-slate-400 ml-1">Settings → Voice Providers (Grok API key, voice selection)</span>
+              </div>
+            </div>
+            <div className="mt-3 p-2 rounded bg-amber-500/10 border border-amber-500/30">
+              <p className="text-xs text-amber-300">
+                <strong>Tip:</strong> The voice agent summarizes briefly by default. Say "give me more details" or 
+                "elaborate on that" to get comprehensive responses.
+              </p>
             </div>
           </div>
         </div>

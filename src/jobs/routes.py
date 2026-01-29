@@ -279,3 +279,70 @@ async def clear_completed_jobs(older_than_days: int = 7):
     queue.clear_completed(older_than_days)
     return {"status": "ok", "message": f"Cleared completed jobs older than {older_than_days} days"}
 
+
+@router.post("/fix-stale-pending")
+async def fix_stale_pending_jobs(older_than_hours: int = 24):
+    """
+    Mark stale pending/in_progress jobs as completed if their data exists.
+    
+    This fixes jobs that ran successfully but never had their status updated.
+    """
+    from datetime import timedelta
+    from pathlib import Path
+    
+    queue = get_job_queue()
+    fixed_count = 0
+    fixed_jobs = []
+    
+    data_dir = Path("/app/data")
+    source_cache_dir = data_dir / "source_cache"
+    summaries_dir = data_dir / "summaries"
+    public_data_cache = data_dir / "public_data_cache.json"
+    
+    # Load public data cache to check for imported data
+    public_cache_keys = set()
+    if public_data_cache.exists():
+        try:
+            import json
+            with open(public_data_cache, "r") as f:
+                public_cache_keys = set(json.load(f).keys())
+        except Exception:
+            pass
+    
+    cutoff = datetime.utcnow() - timedelta(hours=older_than_hours)
+    
+    # Get all pending/in_progress jobs
+    pending_jobs = queue.get_jobs_by_status(JobStatus.PENDING)
+    in_progress_jobs = queue.get_jobs_by_status(JobStatus.IN_PROGRESS)
+    all_stale_candidates = pending_jobs + in_progress_jobs
+    stale_jobs = [j for j in all_stale_candidates if j.created_at < cutoff]
+    
+    for job in stale_jobs:
+        data_exists = False
+        
+        # Check if data exists for this job
+        if job.job_type == JobType.DATA_IMPORT:
+            # Check source_cache for imported data OR public_data_cache
+            cache_file = source_cache_dir / f"{job.target_id}.json"
+            data_exists = cache_file.exists() or job.target_id in public_cache_keys
+        elif job.job_type == JobType.DATA_SUMMARY:
+            # Check summaries for generated summary
+            summary_file = summaries_dir / f"{job.target_id}_summary.json"
+            data_exists = summary_file.exists()
+        
+        if data_exists:
+            queue.complete_job(job.id, {"auto_fixed": True, "reason": "Data exists, job was stale"})
+            fixed_count += 1
+            fixed_jobs.append({
+                "job_id": job.id,
+                "target": job.target_name,
+                "type": job.job_type.value,
+            })
+    
+    return {
+        "status": "ok",
+        "fixed_count": fixed_count,
+        "fixed_jobs": fixed_jobs,
+        "message": f"Fixed {fixed_count} stale pending jobs that had existing data."
+    }
+

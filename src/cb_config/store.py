@@ -50,7 +50,7 @@ class CBConfigStore:
         default_segments = [
             SegmentConfig(
                 tier="tier_e1",
-                label="E1: $1.5k–$10k",
+                label="E1 - Enterprise Mid-Market: $1.5k–$10k MRR",
                 description="Entry enterprise: small multi-site or single large site",
                 mrr_min=1500,
                 mrr_max=10000,
@@ -66,8 +66,8 @@ class CBConfigStore:
             ),
             SegmentConfig(
                 tier="tier_e2",
-                label="E2: $10k–$50k",
-                description="Mid-market enterprise: regional multi-site",
+                label="E2 - Enterprise Small: $10k–$50k MRR",
+                description="Small enterprise: regional multi-site operations",
                 mrr_min=10000,
                 mrr_max=50000,
                 accounts=4200,
@@ -82,8 +82,8 @@ class CBConfigStore:
             ),
             SegmentConfig(
                 tier="tier_e3",
-                label="E3: $50k–$250k",
-                description="Upper mid-market: national presence",
+                label="E3 - Enterprise Medium: $50k–$250k MRR",
+                description="Medium enterprise: national presence",
                 mrr_min=50000,
                 mrr_max=250000,
                 accounts=1100,
@@ -98,7 +98,7 @@ class CBConfigStore:
             ),
             SegmentConfig(
                 tier="tier_e4",
-                label="E4: $250k–$1M",
+                label="E4 - Enterprise Large: $250k–$1M MRR",
                 description="Large enterprise: significant national/global footprint",
                 mrr_min=250000,
                 mrr_max=1000000,
@@ -114,7 +114,7 @@ class CBConfigStore:
             ),
             SegmentConfig(
                 tier="tier_e5",
-                label="E5: $1M+",
+                label="E5 - Enterprise X-Large: $1M+ MRR",
                 description="Strategic enterprise: Fortune 500 / major accounts",
                 mrr_min=1000000,
                 mrr_max=None,

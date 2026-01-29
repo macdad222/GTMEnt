@@ -16,6 +16,7 @@ from src.cb_config.routes import router as cb_config_router
 from src.product_roadmap.routes import router as product_roadmap_router
 from src.insights.routes import router as insights_router
 from src.strategy_report.routes import router as strategy_report_router
+from src.voice.routes import router as voice_router
 
 
 def create_app() -> FastAPI:
@@ -51,6 +52,7 @@ def create_app() -> FastAPI:
     app.include_router(product_roadmap_router)
     app.include_router(insights_router, prefix="/api")
     app.include_router(strategy_report_router, prefix="/api")
+    app.include_router(voice_router, prefix="/api")
 
     # Serve static files (frontend)
     # Try multiple possible locations for the frontend dist

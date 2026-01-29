@@ -19,11 +19,14 @@ import { Documentation } from './pages/Documentation'
 import { Login } from './pages/Login'
 import { CBConfigProvider } from './context/CBConfigContext'
 import { AuthProvider } from './context/AuthContext'
+import { VoiceAgentProvider } from './context/VoiceAgentContext'
+import { GlobalVoiceAgent } from './components/GlobalVoiceAgent'
 
 export default function App() {
   return (
     <AuthProvider>
       <CBConfigProvider>
+        <VoiceAgentProvider>
         <Routes>
           {/* Public route - Login */}
           <Route path="/login" element={<Login />} />
@@ -55,6 +58,8 @@ export default function App() {
             <Route path="docs" element={<Documentation />} />
           </Route>
         </Routes>
+        <GlobalVoiceAgent />
+        </VoiceAgentProvider>
       </CBConfigProvider>
     </AuthProvider>
   )

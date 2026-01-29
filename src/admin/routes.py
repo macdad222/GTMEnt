@@ -10,6 +10,8 @@ from .models import (
     UserRole,
     LLMProvider,
     LLMProviderConfig,
+    VoiceProvider,
+    VoiceProviderConfig,
     DataSourceConfig,
     DataSourceStatus,
     DataSourceLevel,
@@ -50,6 +52,35 @@ class UpdateLLMProviderRequest(BaseModel):
     api_key: Optional[str] = None
     model_name: Optional[str] = None
     is_active: Optional[bool] = None
+
+
+class VoiceProviderResponse(BaseModel):
+    """Voice provider info for API response (with masked key)."""
+    provider: str
+    provider_label: str
+    model_name: str
+    voice_name: str
+    available_voices: List[dict]  # List of {name, description}
+    is_enabled: bool
+    has_key: bool
+    masked_key: str
+    test_status: Optional[str]
+    last_tested: Optional[datetime]
+
+
+class UpdateVoiceProviderRequest(BaseModel):
+    """Request to update a voice provider."""
+    api_key: Optional[str] = None
+    model_name: Optional[str] = None
+    voice_name: Optional[str] = None
+    is_enabled: Optional[bool] = None
+
+
+class VoiceApiKeysResponse(BaseModel):
+    """Response containing voice API keys for frontend use."""
+    api_keys: dict  # provider -> api_key
+    voices: dict  # provider -> voice_name
+    default_provider: Optional[str]
 
 
 class DataSourceResponse(BaseModel):
@@ -301,6 +332,137 @@ async def test_llm_provider(
     
     result = store.test_llm_provider(llm_provider)
     return result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Voice Provider Routes
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _voice_provider_to_response(config: VoiceProviderConfig) -> VoiceProviderResponse:
+    """Convert VoiceProviderConfig to API response."""
+    labels = {
+        VoiceProvider.GEMINI: "Google Gemini",
+        VoiceProvider.GROK: "xAI Grok",
+        VoiceProvider.OPENAI: "OpenAI",
+    }
+    
+    # Available voices per provider
+    available_voices = {
+        VoiceProvider.GROK: [
+            {"name": "Ara", "description": "Female, warm, friendly"},
+            {"name": "Rex", "description": "Male, confident, professional"},
+            {"name": "Sal", "description": "Neutral, smooth, balanced"},
+            {"name": "Eve", "description": "Female, energetic, upbeat"},
+            {"name": "Leo", "description": "Male, authoritative, strong"},
+        ],
+        VoiceProvider.GEMINI: [
+            {"name": "Puck", "description": "Playful, energetic"},
+            {"name": "Charon", "description": "Deep, serious"},
+            {"name": "Kore", "description": "Warm, natural"},
+            {"name": "Fenrir", "description": "Bold, commanding"},
+            {"name": "Aoede", "description": "Melodic, soothing"},
+        ],
+        VoiceProvider.OPENAI: [
+            {"name": "alloy", "description": "Neutral, balanced"},
+            {"name": "echo", "description": "Male, warm"},
+            {"name": "fable", "description": "British, expressive"},
+            {"name": "onyx", "description": "Male, deep"},
+            {"name": "nova", "description": "Female, friendly"},
+            {"name": "shimmer", "description": "Female, soft"},
+        ],
+    }
+    
+    return VoiceProviderResponse(
+        provider=config.provider.value,
+        provider_label=labels.get(config.provider, config.provider.value),
+        model_name=config.model_name or config.get_default_model(),
+        voice_name=config.get_default_voice(),
+        available_voices=available_voices.get(config.provider, []),
+        is_enabled=config.is_enabled,
+        has_key=bool(config.api_key),
+        masked_key=config.masked_key if config.api_key else "",
+        test_status=config.test_status,
+        last_tested=config.last_tested,
+    )
+
+
+@router.get("/voice-providers", response_model=List[VoiceProviderResponse])
+async def list_voice_providers(store: AdminConfigStore = Depends(get_admin_store)):
+    """List all voice providers and their configuration status."""
+    providers = store.get_voice_providers()
+    return [_voice_provider_to_response(p) for p in providers]
+
+
+@router.get("/voice-providers/{provider}", response_model=VoiceProviderResponse)
+async def get_voice_provider(
+    provider: str,
+    store: AdminConfigStore = Depends(get_admin_store),
+):
+    """Get a specific voice provider configuration."""
+    try:
+        voice_provider = VoiceProvider(provider)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid voice provider: {provider}")
+    
+    config = store.get_voice_provider(voice_provider)
+    if not config:
+        raise HTTPException(status_code=404, detail=f"Voice provider {provider} not found")
+    
+    return _voice_provider_to_response(config)
+
+
+@router.put("/voice-providers/{provider}", response_model=VoiceProviderResponse)
+async def update_voice_provider(
+    provider: str,
+    request: UpdateVoiceProviderRequest,
+    store: AdminConfigStore = Depends(get_admin_store),
+):
+    """Update a voice provider configuration (API key, model, enabled status)."""
+    try:
+        voice_provider = VoiceProvider(provider)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid voice provider: {provider}")
+    
+    try:
+        updated = store.update_voice_provider(
+            provider=voice_provider,
+            api_key=request.api_key,
+            model_name=request.model_name,
+            voice_name=request.voice_name,
+            is_enabled=request.is_enabled,
+        )
+        return _voice_provider_to_response(updated)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.get("/voice-api-keys", response_model=VoiceApiKeysResponse)
+async def get_voice_api_keys(store: AdminConfigStore = Depends(get_admin_store)):
+    """Get API keys for enabled voice providers.
+    
+    This endpoint returns actual API keys for use by the frontend voice agent.
+    It only returns keys for enabled providers.
+    """
+    return store.get_voice_api_keys()
+
+
+@router.post("/voice-providers/{provider}/set-default")
+async def set_default_voice_provider(
+    provider: str,
+    store: AdminConfigStore = Depends(get_admin_store),
+):
+    """Set the default voice provider."""
+    try:
+        voice_provider = VoiceProvider(provider)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid voice provider: {provider}")
+    
+    try:
+        store.set_default_voice_provider(voice_provider)
+        return {"success": True, "default_provider": provider}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 # ─────────────────────────────────────────────────────────────────────────────

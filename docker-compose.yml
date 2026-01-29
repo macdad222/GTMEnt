@@ -1,4 +1,5 @@
-version: '3.8'
+# Enterprise Strategy Platform - Docker Compose Configuration
+# Run: docker-compose up -d
 
 services:
   gtm-platform:

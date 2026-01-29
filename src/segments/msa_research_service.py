@@ -4,6 +4,7 @@ import json
 import re
 import uuid
 from datetime import datetime
+from pathlib import Path
 from typing import Optional, Dict, Any, List
 from pydantic import BaseModel, Field
 
@@ -117,7 +118,59 @@ class MSAResearchService:
     
     def __init__(self):
         self._admin_store = AdminConfigStore()
-        self._intel_cache: Dict[str, MSAMarketIntel] = {}
+        self._data_dir = Path("/app/data")
+        self._intel_file = self._data_dir / "msa_intel.json"
+        self._data_dir.mkdir(parents=True, exist_ok=True)
+        self._intel_cache: Dict[str, MSAMarketIntel] = self._load_cache()
+    
+    def _load_cache(self) -> Dict[str, MSAMarketIntel]:
+        """Load cached intel from file."""
+        if not self._intel_file.exists():
+            return {}
+        
+        try:
+            with open(self._intel_file, "r") as f:
+                data = json.load(f)
+            
+            cache = {}
+            for msa_code, intel_data in data.items():
+                try:
+                    # Convert datetime string back to datetime object
+                    if isinstance(intel_data.get("generated_at"), str):
+                        intel_data["generated_at"] = datetime.fromisoformat(intel_data["generated_at"].replace("Z", "+00:00"))
+                    cache[msa_code] = MSAMarketIntel(**intel_data)
+                except Exception as e:
+                    print(f"Warning: Failed to load MSA intel for {msa_code}: {e}")
+                    continue
+            
+            print(f"Loaded {len(cache)} MSA intel entries from cache")
+            return cache
+        except Exception as e:
+            print(f"Warning: Failed to load MSA intel cache: {e}")
+            return {}
+    
+    def _save_cache(self):
+        """Save intel cache to file."""
+        try:
+            data = {}
+            for msa_code, intel in self._intel_cache.items():
+                intel_dict = intel.model_dump()
+                # Convert datetime to ISO string for JSON serialization
+                if isinstance(intel_dict.get("generated_at"), datetime):
+                    intel_dict["generated_at"] = intel_dict["generated_at"].isoformat()
+                data[msa_code] = intel_dict
+            
+            with open(self._intel_file, "w") as f:
+                json.dump(data, f, indent=2, default=str)
+            
+            print(f"Saved {len(data)} MSA intel entries to cache")
+        except Exception as e:
+            print(f"Error saving MSA intel cache: {e}")
+    
+    def save_current_cache(self) -> int:
+        """Manually trigger cache save. Returns number of entries saved."""
+        self._save_cache()
+        return len(self._intel_cache)
     
     def _get_llm_client(self):
         """Get configured LLM client."""
@@ -518,8 +571,9 @@ Ensure sales resource recommendations align with the market opportunity and Comc
                 data_freshness=data.get("data_freshness", ""),
             )
             
-            # Cache the intel
+            # Cache the intel and persist to file
             self._intel_cache[msa_code] = intel
+            self._save_cache()
             
             return intel
         

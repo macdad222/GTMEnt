@@ -30,6 +30,7 @@ import {
   TrophyIcon,
   DocumentTextIcon,
   CloudArrowUpIcon,
+  MicrophoneIcon,
 } from '@heroicons/react/24/outline'
 import { useCBConfig } from '../context/CBConfigContext'
 
@@ -39,6 +40,19 @@ interface LLMProvider {
   provider_label: string
   model_name: string
   is_active: boolean
+  has_key: boolean
+  masked_key: string
+  test_status: string | null
+  last_tested: string | null
+}
+
+interface VoiceProviderState {
+  provider: string
+  provider_label: string
+  model_name: string
+  voice_name: string
+  available_voices: {name: string, description: string}[]
+  is_enabled: boolean
   has_key: boolean
   masked_key: string
   test_status: string | null
@@ -238,12 +252,31 @@ export function AdminSetup() {
   
   // State
   const [llmProviders, setLLMProviders] = useState<LLMProvider[]>([])
+  const [voiceProviders, setVoiceProviders] = useState<VoiceProviderState[]>([])
   const [dataSources, setDataSources] = useState<DataSource[]>([])
   const [users, setUsers] = useState<User[]>([])
   const [roles, setRoles] = useState<Role[]>([])
   const [configSummary, setConfigSummary] = useState<ConfigSummary | null>(null)
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState<'llm' | 'data' | 'users' | 'public' | 'cbconfig' | 'products' | 'sales' | 'help'>('llm')
+  const [activeTab, setActiveTab] = useState<'llm' | 'data' | 'users' | 'public' | 'cbconfig' | 'products' | 'sales' | 'help' | 'voice'>('llm')
+  
+  // Voice provider API key inputs
+  const [voiceApiKeys, setVoiceApiKeys] = useState<{[key: string]: string}>({
+    gemini: '',
+    grok: '',
+    openai: '',
+  })
+  const [voiceModels, setVoiceModels] = useState<{[key: string]: string}>({
+    gemini: 'gemini-2.0-flash-exp',
+    grok: 'grok-4-realtime',
+    openai: 'gpt-4o-realtime-preview',
+  })
+  const [voiceNames, setVoiceNames] = useState<{[key: string]: string}>({
+    gemini: 'Puck',
+    grok: 'Sal',
+    openai: 'alloy',
+  })
+  const [savingVoiceProvider, setSavingVoiceProvider] = useState<string | null>(null)
   
   // Public data sources state
   const [publicDataCategories, setPublicDataCategories] = useState<CategorySummary[]>([])
@@ -286,8 +319,9 @@ export function AdminSetup() {
   const fetchAllData = async () => {
     setLoading(true)
     try {
-      const [providersRes, sourcesRes, usersRes, rolesRes, configRes, publicRes, cbConfigRes, productsRes, capacityRes] = await Promise.all([
+      const [providersRes, voiceProvidersRes, sourcesRes, usersRes, rolesRes, configRes, publicRes, cbConfigRes, productsRes, capacityRes] = await Promise.all([
         fetch('/api/admin/llm-providers'),
+        fetch('/api/admin/voice-providers'),
         fetch('/api/admin/data-sources'),
         fetch('/api/admin/users'),
         fetch('/api/admin/roles'),
@@ -299,6 +333,19 @@ export function AdminSetup() {
       ])
       
       if (providersRes.ok) setLLMProviders(await providersRes.json())
+      if (voiceProvidersRes.ok) {
+        const voiceData = await voiceProvidersRes.json()
+        setVoiceProviders(voiceData)
+        // Update model and voice selections based on current config
+        const newModels: {[key: string]: string} = {...voiceModels}
+        const newVoices: {[key: string]: string} = {...voiceNames}
+        voiceData.forEach((vp: VoiceProviderState) => {
+          if (vp.model_name) newModels[vp.provider] = vp.model_name
+          if (vp.voice_name) newVoices[vp.provider] = vp.voice_name
+        })
+        setVoiceNames(newVoices)
+        setVoiceModels(newModels)
+      }
       if (sourcesRes.ok) setDataSources(await sourcesRes.json())
       if (usersRes.ok) setUsers(await usersRes.json())
       if (rolesRes.ok) {
@@ -347,6 +394,56 @@ export function AdminSetup() {
       console.error('Failed to test provider:', err)
     } finally {
       setTesting(null)
+    }
+  }
+
+  // Voice provider actions
+  const saveVoiceProvider = async (provider: string) => {
+    setSavingVoiceProvider(provider)
+    try {
+      const apiKey = voiceApiKeys[provider]
+      const modelName = voiceModels[provider]
+      const voiceName = voiceNames[provider]
+      
+      // Only update if there's an API key or if provider already has one
+      const existingProvider = voiceProviders.find(vp => vp.provider === provider)
+      if (!apiKey && !existingProvider?.has_key) {
+        console.warn('No API key provided for voice provider:', provider)
+        setSavingVoiceProvider(null)
+        return
+      }
+      
+      const body: {api_key?: string, model_name?: string, voice_name?: string, is_enabled?: boolean} = {
+        model_name: modelName,
+        voice_name: voiceName,
+        is_enabled: true,
+      }
+      
+      // Only include API key if a new one was entered
+      if (apiKey) {
+        body.api_key = apiKey
+      }
+      
+      const res = await fetch(`/api/admin/voice-providers/${provider}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      
+      if (res.ok) {
+        // Clear the input field after successful save
+        setVoiceApiKeys(prev => ({...prev, [provider]: ''}))
+        // Refresh voice providers list
+        const voiceProvidersRes = await fetch('/api/admin/voice-providers')
+        if (voiceProvidersRes.ok) {
+          const voiceData = await voiceProvidersRes.json()
+          setVoiceProviders(voiceData)
+        }
+      }
+    } catch (err) {
+      console.error('Failed to save voice provider:', err)
+    } finally {
+      setSavingVoiceProvider(null)
     }
   }
 
@@ -681,6 +778,7 @@ export function AdminSetup() {
             { id: 'public', label: 'Public Data', icon: GlobeAltIcon },
             { id: 'data', label: 'Internal Data', icon: ServerIcon },
             { id: 'users', label: 'Users', icon: UserGroupIcon },
+            { id: 'voice', label: 'Voice AI', icon: MicrophoneIcon },
             { id: 'help', label: 'Documentation', icon: BookOpenIcon },
           ].map((tab) => (
             <button
@@ -2332,6 +2430,279 @@ export function AdminSetup() {
                     <p className="text-xs text-slate-400 mt-1">{role.description}</p>
                   </div>
                 ))}
+              </div>
+            </div>
+          </div>
+        </motion.div>
+      )}
+
+      {/* Voice AI Tab */}
+      {activeTab === 'voice' && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="space-y-6"
+        >
+          <div className="rounded-xl card-gradient border border-white/10 p-6">
+            <div className="flex items-center gap-3 mb-6">
+              <div className="p-3 rounded-xl bg-purple-500/20">
+                <MicrophoneIcon className="h-8 w-8 text-purple-400" />
+              </div>
+              <div>
+                <h2 className="text-2xl font-bold text-white">Voice AI Configuration</h2>
+                <p className="text-slate-400">Configure real-time voice AI agents for hands-free interaction</p>
+              </div>
+            </div>
+
+            <div className="p-5 rounded-xl bg-gradient-to-r from-purple-500/10 to-pink-500/10 border border-purple-500/30 mb-6">
+              <h3 className="text-lg font-semibold text-white mt-0 flex items-center gap-2">
+                <RocketLaunchIcon className="h-5 w-5 text-purple-400" />
+                Real-Time Voice Interaction
+              </h3>
+              <p className="text-slate-300 text-sm mb-0">
+                Enable voice AI agents to have natural conversations about your data. Ask questions, get insights, 
+                and navigate the platform using your voice. The voice agent uses bidirectional real-time streaming 
+                for low-latency, natural conversations.
+              </p>
+            </div>
+
+            <div className="space-y-6">
+              {/* Gemini Configuration */}
+              <div className="p-5 rounded-xl bg-slate-800/50 border border-slate-700/50">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-lg bg-blue-500/20">
+                      <span className="text-blue-400 font-bold text-lg">G</span>
+                    </div>
+                    <div>
+                      <h4 className="text-white font-semibold">Google Gemini</h4>
+                      <p className="text-xs text-slate-400">Multimodal Live API for real-time voice</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {voiceProviders.find(vp => vp.provider === 'gemini')?.has_key && (
+                      <span className="px-2 py-1 rounded-full bg-emerald-500/20 text-emerald-400 text-xs font-medium flex items-center gap-1">
+                        <CheckCircleIcon className="h-3 w-3" /> Configured
+                      </span>
+                    )}
+                    <span className="px-3 py-1 rounded-full bg-blue-500/20 text-blue-400 text-xs font-medium">
+                      Recommended
+                    </span>
+                  </div>
+                </div>
+                <p className="text-sm text-slate-400 mb-4">
+                  Google Gemini's Multimodal Live API enables natural, real-time voice conversations with 
+                  ultra-low latency. Best for complex multi-turn dialogues and data analysis.
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-1">API Key</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="password"
+                        value={voiceApiKeys.gemini}
+                        onChange={(e) => setVoiceApiKeys(prev => ({...prev, gemini: e.target.value}))}
+                        placeholder={voiceProviders.find(vp => vp.provider === 'gemini')?.has_key ? voiceProviders.find(vp => vp.provider === 'gemini')?.masked_key : "Enter Gemini API Key..."}
+                        className="flex-1 px-3 py-2 rounded-lg bg-slate-900/50 border border-slate-600 text-white placeholder-slate-500 text-sm focus:border-blue-500 focus:outline-none"
+                      />
+                      <button 
+                        onClick={() => saveVoiceProvider('gemini')}
+                        disabled={savingVoiceProvider === 'gemini' || (!voiceApiKeys.gemini && !voiceProviders.find(vp => vp.provider === 'gemini')?.has_key)}
+                        className="px-4 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 disabled:bg-slate-600 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors flex items-center gap-2"
+                      >
+                        {savingVoiceProvider === 'gemini' ? (
+                          <ArrowPathIcon className="h-4 w-4 animate-spin" />
+                        ) : 'Save'}
+                      </button>
+                    </div>
+                    <p className="text-xs text-slate-500 mt-1">Get your API key from Google AI Studio</p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-1">Model</label>
+                    <select 
+                      value={voiceModels.gemini}
+                      onChange={(e) => setVoiceModels(prev => ({...prev, gemini: e.target.value}))}
+                      className="w-full px-3 py-2 rounded-lg bg-slate-900/50 border border-slate-600 text-white text-sm focus:border-blue-500 focus:outline-none"
+                    >
+                      <option value="gemini-2.0-flash-exp">gemini-2.0-flash-exp (Recommended)</option>
+                      <option value="gemini-1.5-pro">gemini-1.5-pro</option>
+                      <option value="gemini-1.5-flash">gemini-1.5-flash</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Grok Configuration */}
+              <div className="p-5 rounded-xl bg-slate-800/50 border border-slate-700/50">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-lg bg-orange-500/20">
+                      <span className="text-orange-400 font-bold text-lg">X</span>
+                    </div>
+                    <div>
+                      <h4 className="text-white font-semibold">xAI Grok</h4>
+                      <p className="text-xs text-slate-400">Realtime Voice API for bidirectional streaming</p>
+                    </div>
+                  </div>
+                  {voiceProviders.find(vp => vp.provider === 'grok')?.has_key && (
+                    <span className="px-2 py-1 rounded-full bg-emerald-500/20 text-emerald-400 text-xs font-medium flex items-center gap-1">
+                      <CheckCircleIcon className="h-3 w-3" /> Configured
+                    </span>
+                  )}
+                </div>
+                <p className="text-sm text-slate-400 mb-4">
+                  Grok's Realtime Voice API provides similar bidirectional voice capabilities with xAI's 
+                  advanced reasoning. Great for analytical discussions and strategic insights.
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-1">API Key</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="password"
+                        value={voiceApiKeys.grok}
+                        onChange={(e) => setVoiceApiKeys(prev => ({...prev, grok: e.target.value}))}
+                        placeholder={voiceProviders.find(vp => vp.provider === 'grok')?.has_key ? voiceProviders.find(vp => vp.provider === 'grok')?.masked_key : "Enter Grok API Key..."}
+                        className="flex-1 px-3 py-2 rounded-lg bg-slate-900/50 border border-slate-600 text-white placeholder-slate-500 text-sm focus:border-orange-500 focus:outline-none"
+                      />
+                      <button 
+                        onClick={() => saveVoiceProvider('grok')}
+                        disabled={savingVoiceProvider === 'grok' || (!voiceApiKeys.grok && !voiceProviders.find(vp => vp.provider === 'grok')?.has_key)}
+                        className="px-4 py-2 rounded-lg bg-orange-500 hover:bg-orange-600 disabled:bg-slate-600 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors flex items-center gap-2"
+                      >
+                        {savingVoiceProvider === 'grok' ? (
+                          <ArrowPathIcon className="h-4 w-4 animate-spin" />
+                        ) : 'Save'}
+                      </button>
+                    </div>
+                    <p className="text-xs text-slate-500 mt-1">Get your API key from x.ai console</p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-1">Model</label>
+                    <select 
+                      value={voiceModels.grok}
+                      onChange={(e) => setVoiceModels(prev => ({...prev, grok: e.target.value}))}
+                      className="w-full px-3 py-2 rounded-lg bg-slate-900/50 border border-slate-600 text-white text-sm focus:border-orange-500 focus:outline-none"
+                    >
+                      <option value="grok-4-realtime">grok-4-realtime</option>
+                      <option value="grok-4">grok-4</option>
+                      <option value="grok-3-fast">grok-3-fast</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-1">Voice</label>
+                    <select 
+                      value={voiceNames.grok}
+                      onChange={(e) => setVoiceNames(prev => ({...prev, grok: e.target.value}))}
+                      className="w-full px-3 py-2 rounded-lg bg-slate-900/50 border border-slate-600 text-white text-sm focus:border-orange-500 focus:outline-none"
+                    >
+                      {(voiceProviders.find(vp => vp.provider === 'grok')?.available_voices || [
+                        {name: 'Ara', description: 'Female, warm, friendly'},
+                        {name: 'Rex', description: 'Male, confident, professional'},
+                        {name: 'Sal', description: 'Neutral, smooth, balanced'},
+                        {name: 'Eve', description: 'Female, energetic, upbeat'},
+                        {name: 'Leo', description: 'Male, authoritative, strong'},
+                      ]).map(voice => (
+                        <option key={voice.name} value={voice.name}>
+                          {voice.name} - {voice.description}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-slate-500 mt-1">Select the voice personality for the AI agent</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* OpenAI Configuration */}
+              <div className="p-5 rounded-xl bg-slate-800/50 border border-slate-700/50">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-lg bg-emerald-500/20">
+                      <span className="text-emerald-400 font-bold text-lg">◉</span>
+                    </div>
+                    <div>
+                      <h4 className="text-white font-semibold">OpenAI Realtime</h4>
+                      <p className="text-xs text-slate-400">Realtime API for voice conversations</p>
+                    </div>
+                  </div>
+                  {voiceProviders.find(vp => vp.provider === 'openai')?.has_key && (
+                    <span className="px-2 py-1 rounded-full bg-emerald-500/20 text-emerald-400 text-xs font-medium flex items-center gap-1">
+                      <CheckCircleIcon className="h-3 w-3" /> Configured
+                    </span>
+                  )}
+                </div>
+                <p className="text-sm text-slate-400 mb-4">
+                  OpenAI's Realtime API enables natural voice conversations with GPT-4 class intelligence. 
+                  Excellent for general purpose voice interactions.
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-1">API Key</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="password"
+                        value={voiceApiKeys.openai}
+                        onChange={(e) => setVoiceApiKeys(prev => ({...prev, openai: e.target.value}))}
+                        placeholder={voiceProviders.find(vp => vp.provider === 'openai')?.has_key ? voiceProviders.find(vp => vp.provider === 'openai')?.masked_key : "Enter OpenAI API Key..."}
+                        className="flex-1 px-3 py-2 rounded-lg bg-slate-900/50 border border-slate-600 text-white placeholder-slate-500 text-sm focus:border-emerald-500 focus:outline-none"
+                      />
+                      <button 
+                        onClick={() => saveVoiceProvider('openai')}
+                        disabled={savingVoiceProvider === 'openai' || (!voiceApiKeys.openai && !voiceProviders.find(vp => vp.provider === 'openai')?.has_key)}
+                        className="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-600 disabled:bg-slate-600 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors flex items-center gap-2"
+                      >
+                        {savingVoiceProvider === 'openai' ? (
+                          <ArrowPathIcon className="h-4 w-4 animate-spin" />
+                        ) : 'Save'}
+                      </button>
+                    </div>
+                    <p className="text-xs text-slate-500 mt-1">Get your API key from platform.openai.com</p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-1">Model</label>
+                    <select 
+                      value={voiceModels.openai}
+                      onChange={(e) => setVoiceModels(prev => ({...prev, openai: e.target.value}))}
+                      className="w-full px-3 py-2 rounded-lg bg-slate-900/50 border border-slate-600 text-white text-sm focus:border-emerald-500 focus:outline-none"
+                    >
+                      <option value="gpt-4o-realtime-preview">gpt-4o-realtime-preview</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Voice Agent Features */}
+            <div className="mt-8 p-5 rounded-xl bg-slate-800/50 border border-slate-700/50">
+              <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+                <LightBulbIcon className="h-5 w-5 text-amber-400" />
+                Voice Agent Capabilities
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="p-3 rounded-lg bg-slate-900/50">
+                  <h4 className="text-white font-medium text-sm mb-1">📊 Data Exploration</h4>
+                  <p className="text-xs text-slate-400">"What's our ARR by segment?" "Show me top MSA markets"</p>
+                </div>
+                <div className="p-3 rounded-lg bg-slate-900/50">
+                  <h4 className="text-white font-medium text-sm mb-1">🎯 Competitive Intel</h4>
+                  <p className="text-xs text-slate-400">"How do we compare to Lumen?" "What's AT&T's positioning?"</p>
+                </div>
+                <div className="p-3 rounded-lg bg-slate-900/50">
+                  <h4 className="text-white font-medium text-sm mb-1">📈 Strategic Insights</h4>
+                  <p className="text-xs text-slate-400">"What should we prioritize for growth?" "Explain segment E3"</p>
+                </div>
+                <div className="p-3 rounded-lg bg-slate-900/50">
+                  <h4 className="text-white font-medium text-sm mb-1">🔄 Navigation</h4>
+                  <p className="text-xs text-slate-400">"Go to MSA analysis" "Open the strategy report"</p>
+                </div>
+                <div className="p-3 rounded-lg bg-slate-900/50">
+                  <h4 className="text-white font-medium text-sm mb-1">💡 Recommendations</h4>
+                  <p className="text-xs text-slate-400">"What products should we focus on?" "Sales capacity advice"</p>
+                </div>
+                <div className="p-3 rounded-lg bg-slate-900/50">
+                  <h4 className="text-white font-medium text-sm mb-1">📋 Report Generation</h4>
+                  <p className="text-xs text-slate-400">"Generate a competitor analysis" "Refresh market data"</p>
+                </div>
               </div>
             </div>
           </div>

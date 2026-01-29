@@ -12,6 +12,8 @@ from .models import (
     UserRole,
     LLMProvider,
     LLMProviderConfig,
+    VoiceProvider,
+    VoiceProviderConfig,
     DataSourceConfig,
     DataSourceStatus,
     DataSourceType,
@@ -125,9 +127,31 @@ class AdminConfigStore:
                     except ValueError:
                         pass
                 
+                # Reconstruct voice providers
+                voice_providers = []
+                for vp_data in data.get('voice_providers', []):
+                    voice_providers.append(VoiceProviderConfig(
+                        provider=VoiceProvider(vp_data['provider']),
+                        api_key=vp_data.get('api_key', ''),
+                        is_enabled=vp_data.get('is_enabled', False),
+                        model_name=vp_data.get('model_name', ''),
+                        voice_name=vp_data.get('voice_name', ''),
+                        test_status=vp_data.get('test_status'),
+                        last_tested=datetime.fromisoformat(vp_data['last_tested']) if vp_data.get('last_tested') else None,
+                    ))
+                
+                default_voice_provider = None
+                if data.get('default_voice_provider'):
+                    try:
+                        default_voice_provider = VoiceProvider(data['default_voice_provider'])
+                    except ValueError:
+                        pass
+                
                 config = PlatformConfig(
                     llm_providers=llm_providers or self._build_default_config().llm_providers,
                     active_llm_provider=active_provider,
+                    voice_providers=voice_providers or self._build_default_config().voice_providers,
+                    default_voice_provider=default_voice_provider,
                     data_sources=data_sources or self._build_default_config().data_sources,
                     default_data_source_level=DataSourceLevel(data.get('default_data_source_level', 'public_only')),
                     users=users or self._build_default_config().users,
@@ -160,6 +184,19 @@ class AdminConfigStore:
                     for p in self._config.llm_providers
                 ],
                 'active_llm_provider': self._config.active_llm_provider.value if self._config.active_llm_provider else None,
+                'voice_providers': [
+                    {
+                        'provider': vp.provider.value,
+                        'api_key': vp.api_key,
+                        'is_enabled': vp.is_enabled,
+                        'model_name': vp.model_name,
+                        'voice_name': vp.voice_name,
+                        'test_status': vp.test_status,
+                        'last_tested': vp.last_tested.isoformat() if vp.last_tested else None,
+                    }
+                    for vp in self._config.voice_providers
+                ],
+                'default_voice_provider': self._config.default_voice_provider.value if self._config.default_voice_provider else None,
                 'data_sources': [
                     {
                         'id': ds.id,
@@ -211,7 +248,7 @@ class AdminConfigStore:
                 provider=LLMProvider.XAI,
                 api_key="",
                 is_active=False,
-                model_name="grok-4.1",
+                model_name="grok-4-1-fast-reasoning",
                 test_status=None,
             ),
             LLMProviderConfig(
@@ -276,6 +313,31 @@ class AdminConfigStore:
             ),
         ]
         
+        # Default voice providers for real-time voice AI (no keys set)
+        voice_providers = [
+            VoiceProviderConfig(
+                provider=VoiceProvider.GEMINI,
+                api_key="",
+                is_enabled=False,
+                model_name="gemini-2.0-flash-exp",
+                test_status=None,
+            ),
+            VoiceProviderConfig(
+                provider=VoiceProvider.GROK,
+                api_key="",
+                is_enabled=False,
+                model_name="grok-4-realtime",
+                test_status=None,
+            ),
+            VoiceProviderConfig(
+                provider=VoiceProvider.OPENAI,
+                api_key="",
+                is_enabled=False,
+                model_name="gpt-4o-realtime-preview",
+                test_status=None,
+            ),
+        ]
+        
         # Single initial admin user with default password "admin" - must change on first login
         default_password_hash, _ = hash_password("admin")
         default_users = [
@@ -293,6 +355,8 @@ class AdminConfigStore:
         return PlatformConfig(
             llm_providers=llm_providers,
             active_llm_provider=None,
+            voice_providers=voice_providers,
+            default_voice_provider=None,
             data_sources=data_sources,
             default_data_source_level=DataSourceLevel.PUBLIC_ONLY,
             users=default_users,
@@ -331,6 +395,12 @@ class AdminConfigStore:
                 # Update fields
                 if api_key is not None:
                     config.api_key = api_key
+                    # Auto-activate if adding API key and no provider is currently active
+                    if api_key and self._config.active_llm_provider is None:
+                        for other in self._config.llm_providers:
+                            other.is_active = False
+                        config.is_active = True
+                        self._config.active_llm_provider = provider
                 if model_name is not None:
                     config.model_name = model_name
                 if is_active is not None:
@@ -377,6 +447,89 @@ class AdminConfigStore:
     def get_active_llm_config(self) -> Optional[LLMProviderConfig]:
         """Get the currently active LLM configuration."""
         return self._config.get_active_llm_config()
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # Voice Provider Management
+    # ─────────────────────────────────────────────────────────────────────────
+    
+    def get_voice_providers(self) -> List[VoiceProviderConfig]:
+        """Get all voice provider configurations."""
+        return self._config.voice_providers
+    
+    def get_voice_provider(self, provider: VoiceProvider) -> Optional[VoiceProviderConfig]:
+        """Get a specific voice provider configuration."""
+        return self._config.get_voice_provider_config(provider)
+    
+    def update_voice_provider(
+        self,
+        provider: VoiceProvider,
+        api_key: Optional[str] = None,
+        model_name: Optional[str] = None,
+        voice_name: Optional[str] = None,
+        is_enabled: Optional[bool] = None,
+    ) -> VoiceProviderConfig:
+        """Update a voice provider configuration."""
+        for i, config in enumerate(self._config.voice_providers):
+            if config.provider == provider:
+                # Update fields
+                if api_key is not None:
+                    config.api_key = api_key
+                    # Auto-enable if adding API key and no provider is currently default
+                    if api_key and self._config.default_voice_provider is None:
+                        config.is_enabled = True
+                        self._config.default_voice_provider = provider
+                if model_name is not None:
+                    config.model_name = model_name
+                if voice_name is not None:
+                    config.voice_name = voice_name
+                if is_enabled is not None:
+                    config.is_enabled = is_enabled
+                    # If enabling and no default set, make this the default
+                    if is_enabled and self._config.default_voice_provider is None:
+                        self._config.default_voice_provider = provider
+                
+                self._config.voice_providers[i] = config
+                self._config.updated_at = datetime.utcnow()
+                self._save_config()
+                return config
+        
+        raise ValueError(f"Voice provider {provider} not found")
+    
+    def set_default_voice_provider(self, provider: VoiceProvider) -> VoiceProviderConfig:
+        """Set the default voice provider."""
+        config = self.get_voice_provider(provider)
+        if not config:
+            raise ValueError(f"Voice provider {provider} not found")
+        if not config.api_key:
+            raise ValueError(f"Voice provider {provider} has no API key configured")
+        
+        self._config.default_voice_provider = provider
+        self._config.updated_at = datetime.utcnow()
+        self._save_config()
+        return config
+    
+    def get_voice_api_keys(self) -> dict:
+        """Get API keys and voice settings for enabled voice providers (for frontend use)."""
+        keys = {}
+        voices = {}
+        default_provider = None
+        
+        for vp in self._config.voice_providers:
+            if vp.api_key and vp.is_enabled:
+                keys[vp.provider.value] = vp.api_key
+                voices[vp.provider.value] = vp.get_default_voice()
+                if self._config.default_voice_provider == vp.provider:
+                    default_provider = vp.provider.value
+        
+        # If no default set, use the first enabled provider
+        if not default_provider and keys:
+            default_provider = list(keys.keys())[0]
+        
+        return {
+            "api_keys": keys,
+            "voices": voices,
+            "default_provider": default_provider,
+        }
     
     # ─────────────────────────────────────────────────────────────────────────
     # Data Source Management

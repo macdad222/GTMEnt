@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   MapPinIcon,
@@ -14,6 +14,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { useCBConfig } from '../context/CBConfigContext'
 import { HelpSection } from '../components/HelpSection'
+import { useJobPolling } from '../hooks/useJobPolling'
 import {
   BarChart,
   Bar,
@@ -196,6 +197,17 @@ function formatNumber(value: number): string {
   return value.toLocaleString()
 }
 
+// Helper to check if intel object is valid (has required fields)
+function isValidMsaIntel(intel: MSAMarketIntel | null | undefined): intel is MSAMarketIntel {
+  return !!(
+    intel && 
+    typeof intel === 'object' && 
+    'executive_summary' in intel && 
+    intel.executive_summary &&
+    'sales_resource_recommendation' in intel
+  )
+}
+
 const REGION_COLORS: Record<string, string> = {
   northeast: '#3b82f6',
   midwest: '#10b981',
@@ -228,6 +240,53 @@ export function MSAAnalysis() {
   const [msaIntel, setMsaIntel] = useState<Record<string, MSAMarketIntel | null>>({})
   const [loadingIntel, setLoadingIntel] = useState<Record<string, boolean>>({})
   const [intelError, setIntelError] = useState<string | null>(null)
+  const [pendingMsaCode, setPendingMsaCode] = useState<string | null>(null)
+  const pendingMsaCodeRef = useRef<string | null>(null)
+  
+  // Batch generation state
+  const [generatingAll, setGeneratingAll] = useState(false)
+  const [allJobsProgress, setAllJobsProgress] = useState<{started: number, completed: number, total: number, skipped: number} | null>(null)
+  
+  // Job polling for async MSA intel generation
+  const {
+    progress: intelProgress,
+    progressMessage: intelProgressMessage,
+    error: intelPollingError,
+    startPolling: startIntelPolling,
+    reset: resetIntelPolling,
+  } = useJobPolling({
+    interval: 2000,
+    timeout: 180000, // 3 minutes
+    onComplete: async () => {
+      const msaCode = pendingMsaCodeRef.current
+      if (msaCode) {
+        // Fetch the generated intel
+        try {
+          const intelRes = await fetch(`/api/msas/${msaCode}/intel`)
+          if (intelRes.ok) {
+            const intelData = await intelRes.json()
+            if (intelData && intelData.executive_summary) {
+              setMsaIntel(prev => ({ ...prev, [msaCode]: intelData }))
+            }
+          }
+        } catch (err) {
+          console.error('Failed to fetch intel after completion:', err)
+        }
+        setLoadingIntel(prev => ({ ...prev, [msaCode]: false }))
+        setPendingMsaCode(null)
+        pendingMsaCodeRef.current = null
+      }
+    },
+    onError: (error) => {
+      const msaCode = pendingMsaCodeRef.current
+      setIntelError(error)
+      if (msaCode) {
+        setLoadingIntel(prev => ({ ...prev, [msaCode]: false }))
+      }
+      setPendingMsaCode(null)
+      pendingMsaCodeRef.current = null
+    },
+  })
   
   // Filters
   const [regionFilter, setRegionFilter] = useState<string>('')
@@ -307,6 +366,8 @@ export function MSAAnalysis() {
   const generateMsaIntel = async (code: string, force: boolean = false) => {
     setLoadingIntel(prev => ({ ...prev, [code]: true }))
     setIntelError(null)
+    resetIntelPolling()
+    
     try {
       const res = await fetch(`/api/msas/${code}/intel/generate?force=${force}`, {
         method: 'POST',
@@ -315,13 +376,108 @@ export function MSAAnalysis() {
         const error = await res.json()
         throw new Error(error.detail || 'Failed to generate intel')
       }
-      const intel = await res.json()
-      setMsaIntel(prev => ({ ...prev, [code]: intel }))
+      const response = await res.json()
+      
+      // Check if async job was started (has job_id)
+      if (response.job_id) {
+        // Store the MSA code for the callback
+        setPendingMsaCode(code)
+        pendingMsaCodeRef.current = code
+        // Start polling the job
+        startIntelPolling(response.job_id)
+        return // Don't set loadingIntel to false - the onComplete callback will do that
+      }
+      
+      // Check if this is a status response (cached) vs actual intel
+      if (response.status === 'cached') {
+        // If cached, fetch the actual intel from GET endpoint
+        const intelRes = await fetch(`/api/msas/${code}/intel`)
+        if (intelRes.ok) {
+          const intelData = await intelRes.json()
+          // Only set if we got actual intel data (has executive_summary)
+          if (intelData && intelData.executive_summary) {
+            setMsaIntel(prev => ({ ...prev, [code]: intelData }))
+          }
+        }
+        setLoadingIntel(prev => ({ ...prev, [code]: false }))
+      } else if (response.executive_summary) {
+        // This is actual intel data (direct response)
+        setMsaIntel(prev => ({ ...prev, [code]: response }))
+        setLoadingIntel(prev => ({ ...prev, [code]: false }))
+      } else {
+        // Unknown response format
+        setLoadingIntel(prev => ({ ...prev, [code]: false }))
+      }
     } catch (err: any) {
       console.error('Failed to generate MSA intel:', err)
       setIntelError(err.message || 'Failed to generate intel')
-    } finally {
       setLoadingIntel(prev => ({ ...prev, [code]: false }))
+    }
+  }
+
+  const generateAllMsaIntel = async (force: boolean = false) => {
+    setGeneratingAll(true)
+    setAllJobsProgress(null)
+    setIntelError(null)
+    
+    try {
+      const res = await fetch(`/api/msas/intel/generate-all?force=${force}`, {
+        method: 'POST',
+      })
+      if (!res.ok) {
+        const error = await res.json()
+        throw new Error(error.detail || 'Failed to start batch generation')
+      }
+      const data = await res.json()
+      
+      if (data.jobs_started > 0) {
+        setAllJobsProgress({ 
+          started: data.jobs_started, 
+          completed: 0, 
+          total: data.total_msas,
+          skipped: data.skipped 
+        })
+        
+        // Poll for completion
+        const jobIds = data.job_ids as string[]
+        
+        const pollInterval = setInterval(async () => {
+          let newCompleted = 0
+          for (const jobId of jobIds) {
+            try {
+              const jobRes = await fetch(`/api/jobs/${jobId}`)
+              if (jobRes.ok) {
+                const job = await jobRes.json()
+                if (job.status === 'completed' || job.status === 'failed') {
+                  newCompleted++
+                }
+              }
+            } catch {}
+          }
+          
+          setAllJobsProgress(prev => prev ? { ...prev, completed: newCompleted } : null)
+          
+          if (newCompleted >= jobIds.length) {
+            clearInterval(pollInterval)
+            setGeneratingAll(false)
+            // Refresh the page data to show newly generated intel
+            fetchData()
+          }
+        }, 5000)
+      } else {
+        // All were cached/skipped
+        setAllJobsProgress({ 
+          started: 0, 
+          completed: 0, 
+          total: data.total_msas,
+          skipped: data.skipped 
+        })
+        setGeneratingAll(false)
+      }
+    } catch (err: any) {
+      console.error('Failed to generate all MSA intel:', err)
+      setIntelError(err.message || 'Failed to start batch generation')
+      setGeneratingAll(false)
     }
   }
 
@@ -553,8 +709,60 @@ export function MSAAnalysis() {
           </select>
         </div>
 
-        <span className="ml-auto text-sm text-slate-400">{msas.length} MSAs</span>
+        {/* Generate All Button */}
+        <button
+          onClick={() => generateAllMsaIntel(false)}
+          disabled={generatingAll}
+          className="ml-auto inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-500 disabled:opacity-50 transition-colors text-sm font-medium"
+        >
+          {generatingAll ? (
+            <>
+              <ArrowPathIcon className="h-4 w-4 animate-spin" />
+              Generating {allJobsProgress ? `(${allJobsProgress.completed}/${allJobsProgress.started})` : '...'}
+            </>
+          ) : (
+            <>
+              <SparklesIcon className="h-4 w-4" />
+              Generate All Intel
+            </>
+          )}
+        </button>
+
+        <span className="text-sm text-slate-400">{msas.length} MSAs</span>
       </div>
+
+      {/* Batch generation progress banner */}
+      {allJobsProgress && (
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="rounded-xl bg-brand-600/20 border border-brand-500/30 p-4"
+        >
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm font-medium text-brand-300">
+              {generatingAll ? 'Generating MSA Intelligence...' : 'Batch Generation Complete'}
+            </span>
+            <span className="text-xs text-slate-400">
+              {allJobsProgress.completed} / {allJobsProgress.started} completed
+              {allJobsProgress.skipped > 0 && ` (${allJobsProgress.skipped} cached)`}
+            </span>
+          </div>
+          <div className="w-full bg-slate-700 rounded-full h-2">
+            <div 
+              className="bg-brand-500 h-2 rounded-full transition-all duration-500"
+              style={{ width: allJobsProgress.started > 0 ? `${(allJobsProgress.completed / allJobsProgress.started) * 100}%` : '0%' }}
+            />
+          </div>
+          {!generatingAll && (
+            <button 
+              onClick={() => setAllJobsProgress(null)}
+              className="mt-2 text-xs text-slate-400 hover:text-white"
+            >
+              Dismiss
+            </button>
+          )}
+        </motion.div>
+      )}
 
       {/* MSA List */}
       <div className="space-y-4">
@@ -653,7 +861,7 @@ export function MSAAnalysis() {
                             AI-Powered Market Intelligence
                           </h4>
                           <div className="flex items-center gap-2">
-                            {msaIntel[msa.code] && (
+                            {isValidMsaIntel(msaIntel[msa.code]) && (
                               <span className="text-xs text-slate-400">
                                 Generated: {new Date(msaIntel[msa.code]!.generated_at).toLocaleDateString()} by {msaIntel[msa.code]!.llm_provider}
                               </span>
@@ -686,23 +894,35 @@ export function MSAAnalysis() {
                           </div>
                         </div>
 
-                        {loadingIntel[msa.code] && !msaIntel[msa.code] && (
+                        {loadingIntel[msa.code] && !isValidMsaIntel(msaIntel[msa.code]) && (
                           <div className="flex items-center justify-center py-12">
                             <div className="text-center">
                               <ArrowPathIcon className="h-8 w-8 animate-spin text-brand-400 mx-auto mb-3" />
-                              <p className="text-slate-300">Analyzing market opportunity...</p>
-                              <p className="text-xs text-slate-500 mt-1">This may take 30-60 seconds</p>
+                              <p className="text-slate-300">
+                                {pendingMsaCode === msa.code && intelProgressMessage 
+                                  ? intelProgressMessage 
+                                  : 'Analyzing market opportunity...'}
+                              </p>
+                              {pendingMsaCode === msa.code && intelProgress > 0 && (
+                                <div className="w-48 mx-auto mt-3 bg-slate-700 rounded-full h-2">
+                                  <div 
+                                    className="bg-brand-500 h-2 rounded-full transition-all duration-300"
+                                    style={{ width: `${Math.min(intelProgress, 100)}%` }}
+                                  />
+                                </div>
+                              )}
+                              <p className="text-xs text-slate-500 mt-2">This may take 30-60 seconds</p>
                             </div>
                           </div>
                         )}
 
-                        {intelError && expandedMsa === msa.code && (
+                        {(intelError || intelPollingError) && expandedMsa === msa.code && (
                           <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm">
-                            {intelError}
+                            {intelError || intelPollingError}
                           </div>
                         )}
 
-                        {msaIntel[msa.code] && !loadingIntel[msa.code] && (
+                        {isValidMsaIntel(msaIntel[msa.code]) && !loadingIntel[msa.code] && (
                           <div className="space-y-6">
                             {/* Executive Summary */}
                             <div>

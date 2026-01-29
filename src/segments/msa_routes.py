@@ -45,7 +45,7 @@ def _run_msa_intel_generation(job_id: str, msa_code: str, msa_name: str, msa_dat
         queue.complete_job(job_id, {
             "msa_code": msa_code,
             "msa_name": msa_name,
-            "market_tam": intel.market_tam_millions if intel else 0,
+            "market_tam": intel.total_enterprise_tam_usd if intel else 0,
         })
         
     except Exception as e:
@@ -840,6 +840,76 @@ def _intel_to_response(intel: MSAMarketIntel) -> MSAMarketIntelResponse:
     )
 
 
+@router.post("/intel/generate-all")
+async def generate_all_msa_intel(
+    force: bool = False,
+    background_tasks: BackgroundTasks = None,
+):
+    """
+    Generate LLM-powered market intelligence for ALL MSAs (async, sequential).
+    
+    Returns immediately with list of job_ids. Poll /api/jobs/{job_id} for status.
+    Jobs run sequentially to avoid overloading the LLM API.
+    """
+    registry = get_msa_registry()
+    research_service = get_msa_research_service()
+    queue = get_job_queue()
+    
+    # Get all MSAs with Comcast infrastructure
+    all_msas = [msa for msa in registry.get_all() if msa.has_fiber or msa.has_coax]
+    
+    jobs_created = []
+    skipped = []
+    
+    for msa in all_msas:
+        # Check cache if not forcing
+        if not force:
+            cached = research_service.get_cached_intel(msa.code)
+            if cached:
+                skipped.append({"msa_code": msa.code, "msa_name": msa.name, "reason": "cached"})
+                continue
+        
+        # Prepare MSA data
+        msa_data = {
+            "msa_code": msa.code,
+            "msa_name": msa.name,
+            "region": msa.region.value,
+            "population": msa.population_2023,
+            "establishments": msa.enterprise_establishments,
+            "has_fiber": msa.has_fiber,
+            "has_coax": msa.has_coax,
+            "comcast_coverage_pct": msa.comcast_coverage_pct,
+            "current_arr": msa.current_arr_usd,
+        }
+        
+        # Create job for this MSA
+        job = queue.create_job(
+            job_type=JobType.MSA_INTEL,
+            target_id=msa.code,
+            target_name=f"MSA Intel: {msa.name}",
+        )
+        jobs_created.append(job)
+        
+        # Schedule background task
+        background_tasks.add_task(
+            _run_msa_intel_generation,
+            job.id,
+            msa.code,
+            msa.name,
+            msa_data,
+        )
+    
+    return {
+        "status": "started",
+        "total_msas": len(all_msas),
+        "jobs_started": len(jobs_created),
+        "skipped": len(skipped),
+        "skipped_details": skipped,
+        "job_ids": [j.id for j in jobs_created],
+        "message": f"Started intel generation for {len(jobs_created)} MSAs. {len(skipped)} already cached."
+    }
+
+
 @router.post("/{msa_code}/intel/generate")
 async def generate_msa_intel(
     msa_code: str,
@@ -983,4 +1053,21 @@ async def get_intel_generation_status():
             for msa in all_msas
             if msa.code not in generated_codes
         ][:20],  # Limit to first 20 pending
+    }
+
+
+@router.post("/intel/save-cache")
+async def save_msa_intel_cache():
+    """
+    Manually save the current in-memory MSA intel cache to disk.
+    
+    Use this before restarting the container to preserve generated intel.
+    """
+    research_service = get_msa_research_service()
+    count = research_service.save_current_cache()
+    
+    return {
+        "status": "saved",
+        "entries_saved": count,
+        "message": f"Successfully saved {count} MSA intel entries to disk."
     }
