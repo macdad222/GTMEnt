@@ -236,7 +236,7 @@ export function Login() {
 
               <div className="mt-4 text-center">
                 <p className="text-xs text-slate-500">
-                  Default credentials: admin / admin
+                  Contact your administrator for access
                 </p>
               </div>
             </form>

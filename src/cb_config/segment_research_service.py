@@ -5,10 +5,13 @@ import re
 import uuid
 from datetime import datetime
 from typing import Optional
+import structlog
 
 from .models import SegmentConfig, SegmentMarketIntel
 from .store import get_cb_config_store
 from src.admin.store import AdminConfigStore
+
+logger = structlog.get_logger(__name__)
 
 
 class SegmentResearchService:
@@ -282,7 +285,7 @@ Be specific with numbers. Use 2024-2025 market data. Focus on actionable insight
                 intel = self.generate_segment_intel(segment.tier, force_refresh)
                 results[segment.tier] = intel
             except Exception as e:
-                print(f"Error generating intel for {segment.tier}: {e}")
+                logger.warning("segment_intel_generation_failed", segment_tier=segment.tier, error=str(e))
         
         return results
     

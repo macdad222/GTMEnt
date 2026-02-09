@@ -7,8 +7,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 from pydantic import BaseModel, Field
+import structlog
 
 from src.admin.store import AdminConfigStore
+
+logger = structlog.get_logger(__name__)
 
 
 class ProductOpportunity(BaseModel):
@@ -140,13 +143,13 @@ class MSAResearchService:
                         intel_data["generated_at"] = datetime.fromisoformat(intel_data["generated_at"].replace("Z", "+00:00"))
                     cache[msa_code] = MSAMarketIntel(**intel_data)
                 except Exception as e:
-                    print(f"Warning: Failed to load MSA intel for {msa_code}: {e}")
+                    logger.warning("msa_intel_load_failed", msa_code=msa_code, error=str(e))
                     continue
             
-            print(f"Loaded {len(cache)} MSA intel entries from cache")
+            logger.info("msa_intel_cache_loaded", count=len(cache))
             return cache
         except Exception as e:
-            print(f"Warning: Failed to load MSA intel cache: {e}")
+            logger.warning("msa_intel_cache_load_failed", error=str(e))
             return {}
     
     def _save_cache(self):
@@ -163,9 +166,9 @@ class MSAResearchService:
             with open(self._intel_file, "w") as f:
                 json.dump(data, f, indent=2, default=str)
             
-            print(f"Saved {len(data)} MSA intel entries to cache")
+            logger.info("msa_intel_cache_saved", count=len(data))
         except Exception as e:
-            print(f"Error saving MSA intel cache: {e}")
+            logger.warning("msa_intel_cache_save_failed", error=str(e))
     
     def save_current_cache(self) -> int:
         """Manually trigger cache save. Returns number of entries saved."""
@@ -578,11 +581,11 @@ Ensure sales resource recommendations align with the market opportunity and Comc
             return intel
         
         except json.JSONDecodeError as e:
-            print(f"JSON Decode Error: {e}")
-            print(f"LLM Response: {llm_response_content}")
+            logger.error("msa_intel_json_decode_error", error=str(e))
+            logger.error("msa_intel_llm_response_invalid", response=llm_response_content[:500])
             raise ValueError(f"Failed to parse LLM response as JSON: {e}")
         except Exception as e:
-            print(f"Error generating MSA intel: {e}")
+            logger.error("msa_intel_generation_failed", error=str(e))
             raise
     
     def get_cached_intel(self, msa_code: str) -> Optional[MSAMarketIntel]:

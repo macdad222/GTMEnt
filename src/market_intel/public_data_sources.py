@@ -12,6 +12,9 @@ from pydantic import BaseModel, Field
 import json
 import os
 import hashlib
+import structlog
+
+logger = structlog.get_logger(__name__)
 
 
 class DataSourceCategory(str, Enum):
@@ -398,7 +401,7 @@ class PublicDataSourceRegistry:
                         source.cached_data = cached.get('cached_data')
                         source.error_message = cached.get('error_message')
         except Exception as e:
-            print(f"Warning: Could not load cache: {e}")
+            logger.warning("public_data_cache_load_failed", error=str(e))
     
     def _save_cache(self):
         """Save cached data to persistent storage."""
@@ -418,7 +421,7 @@ class PublicDataSourceRegistry:
             with open(self.CACHE_FILE, 'w') as f:
                 json.dump(cache_data, f, indent=2)
         except Exception as e:
-            print(f"Warning: Could not save cache: {e}")
+            logger.warning("public_data_cache_save_failed", error=str(e))
     
     def get_all_sources(self) -> List[PublicDataSource]:
         """Get all public data sources."""

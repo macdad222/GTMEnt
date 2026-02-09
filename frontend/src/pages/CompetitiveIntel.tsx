@@ -885,9 +885,17 @@ function formatBodyText(text: string): React.ReactNode {
   );
 }
 
-// Format inline markdown (bold, italic)
+// Escape HTML entities to prevent XSS before applying markdown formatting
+function escapeHtml(text: string): string {
+  const div = document.createElement('div');
+  div.appendChild(document.createTextNode(text));
+  return div.innerHTML;
+}
+
+// Format inline markdown (bold, italic) with XSS protection
 function formatInlineMarkdown(text: string): string {
-  return text
+  // First escape any HTML to prevent injection, then apply markdown formatting
+  return escapeHtml(text)
     .replace(/\*\*(.+?)\*\*/g, '<strong class="text-white font-semibold">$1</strong>')
     .replace(/\*(.+?)\*/g, '<em class="text-slate-200">$1</em>')
     .replace(/`(.+?)`/g, '<code class="px-1 py-0.5 bg-slate-700 rounded text-amber-300 text-xs">$1</code>');

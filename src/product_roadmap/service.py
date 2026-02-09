@@ -6,6 +6,7 @@ import re
 from datetime import datetime
 from typing import Optional
 from pathlib import Path
+import structlog
 
 from .models import (
     ProductPortfolio,
@@ -18,6 +19,8 @@ from .models import (
     CompetitorProduct,
     DEFAULT_PRODUCT_PORTFOLIO,
 )
+
+logger = structlog.get_logger(__name__)
 
 
 class ProductRoadmapService:
@@ -50,7 +53,7 @@ class ProductRoadmapService:
                     data = json.load(f)
                 return ProductRoadmapIntel(**data)
             except Exception as e:
-                print(f"Error loading product roadmap intel: {e}")
+                logger.warning("product_roadmap_intel_load_failed", error=str(e))
         return None
     
     def _save_intel(self, intel: ProductRoadmapIntel) -> None:
@@ -60,7 +63,7 @@ class ProductRoadmapService:
                 json.dump(intel.model_dump(mode="json"), f, indent=2, default=str)
             self._intel = intel
         except Exception as e:
-            print(f"Error saving product roadmap intel: {e}")
+            logger.warning("product_roadmap_intel_save_failed", error=str(e))
     
     def get_intel(self) -> Optional[ProductRoadmapIntel]:
         """Get the current product roadmap intel."""
@@ -343,8 +346,7 @@ Be specific and actionable. This will be used by senior executives to make inves
         try:
             data = json.loads(json_str)
         except json.JSONDecodeError as e:
-            print(f"JSON parse error: {e}")
-            print(f"Attempted to parse: {json_str[:500]}...")
+            logger.error("product_roadmap_json_parse_error", error=str(e), json_preview=json_str[:500])
             raise ValueError(f"Failed to parse LLM response as JSON: {e}")
         
         # Build competitive analysis

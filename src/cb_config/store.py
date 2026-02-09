@@ -6,6 +6,10 @@ from datetime import datetime
 from typing import Optional, List
 from pathlib import Path
 
+import structlog
+
+logger = structlog.get_logger(__name__)
+
 from .models import (
     CBConfiguration,
     CompanyMetrics,
@@ -711,7 +715,7 @@ class CBConfigStore:
                 
                 return config
             except Exception as e:
-                print(f"Error loading CB config, using defaults: {e}")
+                logger.warning("cb_config_load_failed", error=str(e))
         
         # No saved config - save defaults and return
         self._config = defaults
@@ -749,7 +753,7 @@ class CBConfigStore:
             with open(self._config_file, "w") as f:
                 json.dump(self._config.model_dump(mode="json"), f, indent=2, default=str)
         except Exception as e:
-            print(f"Error saving CB config: {e}")
+            logger.warning("cb_config_save_failed", error=str(e))
     
     def _load_intel(self) -> dict[str, SegmentMarketIntel]:
         """Load segment intel from file."""
@@ -759,7 +763,7 @@ class CBConfigStore:
                     data = json.load(f)
                 return {k: SegmentMarketIntel(**v) for k, v in data.items()}
             except Exception as e:
-                print(f"Error loading segment intel: {e}")
+                logger.warning("segment_intel_load_failed", error=str(e))
         return {}
     
     def _save_intel(self) -> None:
@@ -769,7 +773,7 @@ class CBConfigStore:
                 data = {k: v.model_dump(mode="json") for k, v in self._segment_intel.items()}
                 json.dump(data, f, indent=2, default=str)
         except Exception as e:
-            print(f"Error saving segment intel: {e}")
+            logger.warning("segment_intel_save_failed", error=str(e))
     
     # Configuration methods
     def get_config(self) -> CBConfiguration:

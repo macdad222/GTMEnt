@@ -7,6 +7,10 @@ import os
 import hashlib
 import secrets
 
+import structlog
+
+logger = structlog.get_logger(__name__)
+
 from .models import (
     User,
     UserRole,
@@ -163,7 +167,7 @@ class AdminConfigStore:
                 
                 return config
         except Exception as e:
-            print(f"Warning: Could not load admin config: {e}")
+            logger.warning("admin_config_load_failed", error=str(e))
         return None
     
     def _save_config(self):
@@ -231,7 +235,7 @@ class AdminConfigStore:
             with open(self.CONFIG_FILE, 'w') as f:
                 json.dump(data, f, indent=2)
         except Exception as e:
-            print(f"Warning: Could not save admin config: {e}")
+            logger.warning("admin_config_save_failed", error=str(e))
     
     def _build_default_config(self) -> PlatformConfig:
         """Build default platform configuration."""

@@ -6,7 +6,11 @@ import json
 import os
 import threading
 
+import structlog
+
 from .models import Job, JobStatus, JobType, JobSummary
+
+logger = structlog.get_logger(__name__)
 
 
 class JobQueue:
@@ -37,7 +41,7 @@ class JobQueue:
                     job = Job(**job_data)
                     self._jobs[job.id] = job
         except Exception as e:
-            print(f"Warning: Could not load job queue: {e}")
+            logger.warning("job_queue_load_failed", error=str(e))
     
     def _save_queue(self):
         """Save jobs to persistent storage."""
@@ -56,7 +60,7 @@ class JobQueue:
             with open(self.QUEUE_FILE, 'w') as f:
                 json.dump({'jobs': jobs_data}, f, indent=2, default=str)
         except Exception as e:
-            print(f"Warning: Could not save job queue: {e}")
+            logger.warning("job_queue_save_failed", error=str(e))
     
     def create_job(
         self,

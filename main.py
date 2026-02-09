@@ -9,17 +9,21 @@ playbook generation.
 """
 
 import uvicorn
-from src.api.app import app
+
+from src.config import get_settings, setup_logging
 
 
 def main():
     """Run the FastAPI application."""
+    settings = get_settings()
+    setup_logging(settings.log_level)
+
     uvicorn.run(
         "src.api.app:app",
         host="0.0.0.0",
         port=3700,
-        reload=True,
-        log_level="info",
+        reload=(settings.app_env == "development"),
+        log_level=settings.log_level.lower(),
     )
 
 

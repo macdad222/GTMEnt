@@ -1,11 +1,13 @@
 """FastAPI application factory."""
 
+import structlog
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
 import os
 
+from src.config import get_settings
 from .routes import router
 from src.admin.routes import router as admin_router
 from src.market_intel.routes import router as market_intel_router
@@ -18,24 +20,44 @@ from src.insights.routes import router as insights_router
 from src.strategy_report.routes import router as strategy_report_router
 from src.voice.routes import router as voice_router
 
+logger = structlog.get_logger(__name__)
+
 
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
+    settings = get_settings()
+
     app = FastAPI(
         title="Enterprise Strategy Playbook Platform",
         description=(
             "A role-based platform for generating BCG/Altman-style enterprise strategy decks "
             "and segment playbooks for Comcast Business Enterprise."
         ),
-        version="0.1.0",
+        version="0.2.0",
         docs_url="/api/docs",
         redoc_url="/api/redoc",
     )
 
-    # CORS middleware
+    # ── Global exception handler ────────────────────────────────────────
+    @app.exception_handler(Exception)
+    async def global_exception_handler(request: Request, exc: Exception):
+        logger.error(
+            "unhandled_exception",
+            path=str(request.url),
+            method=request.method,
+            error=str(exc),
+            exc_info=exc,
+        )
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "An internal error occurred. Please try again later."},
+        )
+
+    # ── CORS middleware (restricted origins) ─────────────────────────────
+    allowed_origins = [o.strip() for o in settings.allowed_origins.split(",") if o.strip()]
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],  # Configure appropriately for production
+        allow_origins=allowed_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

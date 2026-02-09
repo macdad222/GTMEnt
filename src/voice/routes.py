@@ -9,8 +9,11 @@ import json
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 import websockets
 from websockets.exceptions import ConnectionClosed, InvalidStatusCode
+import structlog
 
 from src.admin.store import AdminConfigStore
+
+logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/voice", tags=["Voice"])
 
@@ -40,11 +43,11 @@ async def grok_voice_proxy(websocket: WebSocket):
     grok_key = voice_keys.get("api_keys", {}).get("grok")
     
     if not grok_key:
-        print("Grok Voice proxy: No API key configured")
+        logger.warning("grok_proxy_no_api_key")
         await websocket.close(code=4001, reason="Grok API key not configured")
         return
     
-    print(f"Grok Voice proxy: Connecting to {GROK_REALTIME_URL}")
+    logger.info("grok_proxy_connecting", url=GROK_REALTIME_URL)
     
     # Connection headers for Grok API (websockets 16+ uses dict for additional_headers)
     headers = {
@@ -61,7 +64,7 @@ async def grok_voice_proxy(websocket: WebSocket):
             ping_interval=20,
             ping_timeout=20,
         )
-        print("Grok Voice proxy: Connected to xAI API")
+        logger.info("grok_proxy_connected")
         
         # Create tasks for bidirectional forwarding
         async def forward_browser_to_grok():
@@ -71,9 +74,9 @@ async def grok_voice_proxy(websocket: WebSocket):
                     data = await websocket.receive_text()
                     await grok_ws.send(data)
             except WebSocketDisconnect:
-                print("Grok Voice proxy: Browser disconnected")
+                logger.info("grok_proxy_browser_disconnected")
             except Exception as e:
-                print(f"Grok Voice proxy: Error forwarding to Grok: {e}")
+                logger.warning("grok_proxy_forward_error", error=str(e))
         
         async def forward_grok_to_browser():
             """Forward messages from Grok API to browser."""
@@ -84,9 +87,9 @@ async def grok_voice_proxy(websocket: WebSocket):
                     else:
                         await websocket.send_text(message)
             except ConnectionClosed as e:
-                print(f"Grok Voice proxy: Grok connection closed: {e}")
+                logger.info("grok_proxy_connection_closed", reason=str(e))
             except Exception as e:
-                print(f"Grok Voice proxy: Error forwarding to browser: {e}")
+                logger.warning("grok_proxy_browser_forward_error", error=str(e))
         
         # Run both forwarding tasks concurrently
         browser_task = asyncio.create_task(forward_browser_to_grok())
@@ -107,10 +110,10 @@ async def grok_voice_proxy(websocket: WebSocket):
                 pass
         
     except InvalidStatusCode as e:
-        print(f"Grok Voice proxy: Connection rejected: {e}")
+        logger.error("grok_proxy_connection_rejected", error=str(e))
         await websocket.close(code=4002, reason=f"Grok API rejected: {e.status_code}")
     except Exception as e:
-        print(f"Grok Voice proxy: Error: {e}")
+        logger.error("grok_proxy_error", error=str(e))
         try:
             await websocket.close(code=4003, reason=str(e)[:100])
         except Exception:
@@ -122,7 +125,7 @@ async def grok_voice_proxy(websocket: WebSocket):
                 await grok_ws.close()
             except Exception:
                 pass
-        print("Grok Voice proxy: Connection closed")
+        logger.info("grok_proxy_connection_closed")
 
 
 @router.get("/status")

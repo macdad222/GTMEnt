@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 
 // Types
 interface User {
@@ -11,12 +11,15 @@ interface User {
 
 interface AuthContextType {
   user: User | null;
+  token: string | null;
   isAuthenticated: boolean;
   isLoading: boolean;
   login: (username: string, password: string) => Promise<LoginResult>;
   logout: () => void;
   setPassword: (userId: string, password: string, confirmPassword: string) => Promise<SetPasswordResult>;
   clearPasswordChangeRequired: () => void;
+  /** Returns headers with Authorization bearer token included. */
+  authHeaders: () => Record<string, string>;
 }
 
 interface LoginResult {
@@ -33,26 +36,39 @@ interface SetPasswordResult {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const SESSION_KEY = 'gtm_user_session';
+const TOKEN_KEY = 'gtm_auth_token';
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
+  const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   // Check for existing session on mount
   useEffect(() => {
     const storedSession = localStorage.getItem(SESSION_KEY);
-    if (storedSession) {
+    const storedToken = localStorage.getItem(TOKEN_KEY);
+    if (storedSession && storedToken) {
       try {
         const userData = JSON.parse(storedSession);
         setUser(userData);
-      } catch (e) {
+        setToken(storedToken);
+      } catch {
         localStorage.removeItem(SESSION_KEY);
+        localStorage.removeItem(TOKEN_KEY);
       }
     }
     setIsLoading(false);
   }, []);
 
-  const login = async (username: string, password: string): Promise<LoginResult> => {
+  const authHeaders = useCallback((): Record<string, string> => {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    return headers;
+  }, [token]);
+
+  const login = useCallback(async (username: string, password: string): Promise<LoginResult> => {
     try {
       const response = await fetch('/api/admin/login', {
         method: 'POST',
@@ -71,7 +87,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           requiresPasswordChange: data.requires_password_change || false,
         };
         setUser(userData);
+        setToken(data.token || null);
         localStorage.setItem(SESSION_KEY, JSON.stringify(userData));
+        if (data.token) {
+          localStorage.setItem(TOKEN_KEY, data.token);
+        }
         return {
           success: true,
           requiresPasswordChange: data.requires_password_change,
@@ -83,14 +103,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.error('Login error:', error);
       return { success: false, message: 'Network error. Please try again.' };
     }
-  };
+  }, []);
 
-  const logout = () => {
+  const logout = useCallback(() => {
     setUser(null);
+    setToken(null);
     localStorage.removeItem(SESSION_KEY);
-  };
+    localStorage.removeItem(TOKEN_KEY);
+  }, []);
 
-  const setPassword = async (
+  const setPassword = useCallback(async (
     userId: string,
     password: string,
     confirmPassword: string
@@ -98,7 +120,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const response = await fetch(`/api/admin/users/${userId}/set-password`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders(),
         body: JSON.stringify({ password, confirm_password: confirmPassword }),
       });
 
@@ -106,11 +128,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (response.ok) {
         // Update user to clear requiresPasswordChange
-        if (user) {
-          const updatedUser = { ...user, requiresPasswordChange: false };
-          setUser(updatedUser);
+        setUser(prev => {
+          if (!prev) return prev;
+          const updatedUser = { ...prev, requiresPasswordChange: false };
           localStorage.setItem(SESSION_KEY, JSON.stringify(updatedUser));
-        }
+          return updatedUser;
+        });
         return { success: true };
       } else {
         return { success: false, message: data.detail || 'Failed to set password' };
@@ -119,26 +142,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.error('Set password error:', error);
       return { success: false, message: 'Network error. Please try again.' };
     }
-  };
+  }, [authHeaders]);
 
-  const clearPasswordChangeRequired = () => {
-    if (user) {
-      const updatedUser = { ...user, requiresPasswordChange: false };
-      setUser(updatedUser);
+  const clearPasswordChangeRequired = useCallback(() => {
+    setUser(prev => {
+      if (!prev) return prev;
+      const updatedUser = { ...prev, requiresPasswordChange: false };
       localStorage.setItem(SESSION_KEY, JSON.stringify(updatedUser));
-    }
-  };
+      return updatedUser;
+    });
+  }, []);
 
   return (
     <AuthContext.Provider
       value={{
         user,
-        isAuthenticated: !!user,
+        token,
+        isAuthenticated: !!user && !!token,
         isLoading,
         login,
         logout,
         setPassword,
         clearPasswordChangeRequired,
+        authHeaders,
       }}
     >
       {children}

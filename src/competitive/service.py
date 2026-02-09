@@ -5,6 +5,7 @@ import os
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 import httpx
+import structlog
 
 from .models import (
     Competitor, 
@@ -14,6 +15,8 @@ from .models import (
 )
 from .scraper import get_web_scraper
 from src.admin.store import admin_store
+
+logger = structlog.get_logger(__name__)
 
 
 class CompetitiveIntelService:
@@ -46,7 +49,7 @@ class CompetitiveIntelService:
                     if data.get('comcast_data'):
                         self._comcast_data = ScrapedWebContent(**data['comcast_data'])
             except Exception as e:
-                print(f"Warning: Could not load competitors: {e}")
+                logger.warning("competitors_load_failed", error=str(e))
         
         if os.path.exists(self.ANALYSIS_FILE):
             try:
@@ -56,7 +59,7 @@ class CompetitiveIntelService:
                         analysis = CompetitiveAnalysis(**a_data)
                         self._analyses[analysis.id] = analysis
             except Exception as e:
-                print(f"Warning: Could not load analyses: {e}")
+                logger.warning("analyses_load_failed", error=str(e))
     
     def _save_data(self):
         """Save competitors to file."""
@@ -69,7 +72,7 @@ class CompetitiveIntelService:
             with open(self.DATA_FILE, 'w') as f:
                 json.dump(data, f, indent=2, default=str)
         except Exception as e:
-            print(f"Warning: Could not save competitors: {e}")
+            logger.warning("competitors_save_failed", error=str(e))
     
     def _save_analyses(self):
         """Save analyses to file."""
@@ -81,7 +84,7 @@ class CompetitiveIntelService:
                     f, indent=2, default=str
                 )
         except Exception as e:
-            print(f"Warning: Could not save analyses: {e}")
+            logger.warning("analyses_save_failed", error=str(e))
     
     def _init_default_competitors(self):
         """Initialize default competitors if none exist."""

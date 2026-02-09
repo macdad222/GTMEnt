@@ -152,6 +152,7 @@ class LoginResponse(BaseModel):
     role: Optional[str] = None
     requires_password_change: bool = False
     message: Optional[str] = None
+    token: Optional[str] = None  # JWT access token
 
 
 class ConfigSummaryResponse(BaseModel):
@@ -701,7 +702,9 @@ async def login(
     request: LoginRequest,
     store: AdminConfigStore = Depends(get_admin_store),
 ):
-    """Login with username and password."""
+    """Login with username and password. Returns a JWT access token on success."""
+    from src.auth.middleware import create_access_token
+
     # Check if user exists
     user = store.get_user_by_username(request.username)
     if not user:
@@ -712,6 +715,7 @@ async def login(
     
     # Check if user needs password setup (first login)
     if user.password_hash is None:
+        token = create_access_token(user.id, user.username, user.role.value)
         return LoginResponse(
             success=True,
             user_id=user.id,
@@ -720,6 +724,7 @@ async def login(
             role=user.role.value,
             requires_password_change=True,
             message="Please set your password",
+            token=token,
         )
     
     # Verify password
@@ -727,6 +732,7 @@ async def login(
     if not verified_user:
         return LoginResponse(success=False, message="Invalid username or password")
     
+    token = create_access_token(verified_user.id, verified_user.username, verified_user.role.value)
     return LoginResponse(
         success=True,
         user_id=verified_user.id,
@@ -734,6 +740,7 @@ async def login(
         name=verified_user.name,
         role=verified_user.role.value,
         requires_password_change=verified_user.requires_password_change,
+        token=token,
     )
 
 

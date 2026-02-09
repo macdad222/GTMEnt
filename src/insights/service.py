@@ -7,6 +7,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
+import structlog
+
+logger = structlog.get_logger(__name__)
+
 from .models import (
     InsightQuestion,
     InsightQuestionCreate,
@@ -48,7 +52,7 @@ class InsightsService:
                     data = json.load(f)
                 return InsightsStore(**data)
             except Exception as e:
-                print(f"Error loading insights: {e}")
+                logger.warning("insights_load_failed", error=str(e))
         return InsightsStore()
     
     def _save_store(self) -> None:
@@ -58,7 +62,7 @@ class InsightsService:
             with open(self._insights_file, "w") as f:
                 json.dump(self._store.model_dump(mode="json"), f, indent=2, default=str)
         except Exception as e:
-            print(f"Error saving insights: {e}")
+            logger.warning("insights_save_failed", error=str(e))
     
     def _gather_platform_context(self) -> tuple[str, List[DataSourceUsed]]:
         """Gather all relevant data from the platform for context."""
@@ -177,7 +181,7 @@ Rep Quotas (MRR):
                     data_timestamp=str(datetime.now())
                 ))
         except Exception as e:
-            print(f"Error loading CB config context: {e}")
+            logger.warning("cb_config_context_load_failed", error=str(e))
         
         # 2. Competitive Intelligence
         try:
@@ -213,7 +217,7 @@ Rep Quotas (MRR):
                 data_timestamp=str(datetime.now())
             ))
         except Exception as e:
-            print(f"Error loading competitive context: {e}")
+            logger.warning("competitive_context_load_failed", error=str(e))
         
         # 3. Market Research Data
         try:
@@ -244,7 +248,7 @@ Rep Quotas (MRR):
                     data_timestamp=market_data.get("last_updated", str(datetime.now()))
                 ))
         except Exception as e:
-            print(f"Error loading market research context: {e}")
+            logger.warning("market_research_context_load_failed", error=str(e))
         
         # 4. MSA Data
         try:
@@ -272,7 +276,7 @@ Rep Quotas (MRR):
                     data_timestamp=str(datetime.now())
                 ))
         except Exception as e:
-            print(f"Error loading MSA context: {e}")
+            logger.warning("msa_context_load_failed", error=str(e))
         
         # 5. Incorporated Insights (from previous Q&A)
         incorporated = self.get_incorporated_insights()

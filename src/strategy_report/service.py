@@ -7,6 +7,7 @@ from typing import Dict, Any, Optional, List
 from pathlib import Path
 import asyncio
 import httpx
+import structlog
 
 from .models import (
     StrategyReport, ReportStatus, ReportSection, ReportSectionContent,
@@ -21,6 +22,8 @@ from src.competitive.service import CompetitiveIntelService
 from src.market_intel.market_research_service import MarketResearchService
 from src.segments.msa_model import get_msa_registry, MSA
 from src.segments.msa_research_service import get_msa_research_service, MSAMarketIntel
+
+logger = structlog.get_logger(__name__)
 
 
 class StrategyReportService:
@@ -61,7 +64,7 @@ class StrategyReportService:
                     data = json.load(f)
                 return {k: StrategyReport(**v) for k, v in data.items()}
             except Exception as e:
-                print(f"Error loading strategy reports: {e}")
+                logger.warning("strategy_reports_load_failed", error=str(e))
         return {}
     
     def _save_reports(self) -> None:
@@ -73,7 +76,7 @@ class StrategyReportService:
                     f, indent=2, default=str
                 )
         except Exception as e:
-            print(f"Error saving strategy reports: {e}")
+            logger.warning("strategy_reports_save_failed", error=str(e))
     
     def get_all_reports(self) -> List[StrategyReport]:
         """Get all generated reports."""
@@ -142,7 +145,7 @@ class StrategyReportService:
         except Exception as e:
             report.status = ReportStatus.FAILED
             report.error_message = str(e)
-            print(f"Error generating strategy report: {e}")
+            logger.error("strategy_report_generation_failed", error=str(e))
             import traceback
             traceback.print_exc()
         
@@ -167,7 +170,7 @@ class StrategyReportService:
             data["primary_markets"] = cb_config.primary_markets
             data["key_competitors"] = cb_config.key_competitors
         except Exception as e:
-            print(f"Error gathering CB config: {e}")
+            logger.warning("strategy_report_cb_config_error", error=str(e))
             data["company_metrics"] = {}
         
         # 2. Competitive Intelligence - GET ALL COMPETITORS AND ANALYSES
@@ -204,7 +207,7 @@ class StrategyReportService:
                         "key_differentiators": getattr(analysis, 'key_differentiators', []),
                     })
         except Exception as e:
-            print(f"Error gathering competitive intel: {e}")
+            logger.warning("strategy_report_competitive_error", error=str(e))
             data["competitors"] = []
             data["competitive_analyses"] = []
         
@@ -216,7 +219,7 @@ class StrategyReportService:
             else:
                 data["market_intelligence"] = {}
         except Exception as e:
-            print(f"Error gathering market intel: {e}")
+            logger.warning("strategy_report_market_error", error=str(e))
             data["market_intelligence"] = {}
         
         # 4. MSA Geographic Data - GET ALL MSAs WITH FULL INTEL
@@ -263,7 +266,7 @@ class StrategyReportService:
                     }
                 data["msa_markets"].append(msa_data)
         except Exception as e:
-            print(f"Error gathering MSA data: {e}")
+            logger.warning("strategy_report_msa_error", error=str(e))
             data["msa_markets"] = []
         
         # 5. Segment Summary
@@ -289,7 +292,7 @@ class StrategyReportService:
                 })
             data["segment_summaries"] = segment_summaries
         except Exception as e:
-            print(f"Error gathering segment summaries: {e}")
+            logger.warning("strategy_report_segments_error", error=str(e))
             data["segment_summaries"] = []
         
         # 6. Segment Market Intelligence (LLM-generated insights per segment)
@@ -316,7 +319,7 @@ class StrategyReportService:
                     })
             data["segment_intel"] = segment_intel
         except Exception as e:
-            print(f"Error gathering segment intel: {e}")
+            logger.warning("strategy_report_segment_intel_error", error=str(e))
             data["segment_intel"] = []
         
         # 7. Product Portfolio Details (with full analysis)
@@ -343,7 +346,7 @@ class StrategyReportService:
                 })
             data["product_portfolio_details"] = product_details
         except Exception as e:
-            print(f"Error gathering product details: {e}")
+            logger.warning("strategy_report_products_error", error=str(e))
             data["product_portfolio_details"] = []
         
         return data

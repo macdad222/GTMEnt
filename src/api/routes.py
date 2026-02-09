@@ -440,6 +440,31 @@ async def list_templates():
 
 @router.get("/admin/health")
 async def health_check():
-    """Health check endpoint."""
-    return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
+    """Health check endpoint with dependency status."""
+    import os
+
+    checks = {
+        "api": "healthy",
+        "data_dir": "healthy" if os.path.isdir("./data") else "missing",
+    }
+
+    # Check admin config readability
+    try:
+        store = AdminConfigStore()
+        _ = store.config
+        checks["admin_store"] = "healthy"
+    except Exception:
+        checks["admin_store"] = "degraded"
+
+    # Check LLM config
+    active_llm = _admin_store.get_active_llm_config()
+    checks["llm_configured"] = "configured" if active_llm and active_llm.api_key else "not_configured"
+
+    overall = "healthy" if all(v in ("healthy", "configured") for v in checks.values()) else "degraded"
+
+    return {
+        "status": overall,
+        "timestamp": datetime.utcnow().isoformat(),
+        "checks": checks,
+    }
 
