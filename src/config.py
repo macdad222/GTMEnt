@@ -10,7 +10,16 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     # Database
-    database_url: str = "postgresql+asyncpg://user:password@localhost:5432/gtm_ent"
+    database_url: str = "postgresql+psycopg2://gtm:gtm_dev_password@postgres:5432/gtm_ent"
+
+    # Redis
+    redis_url: str = "redis://redis:6379/0"
+
+    # Auth
+    jwt_secret: str = "change-me-in-production-use-a-real-secret"
+    jwt_algorithm: str = "HS256"
+    jwt_expiry_hours: int = 72
+    gate_access_code: str = "ComcastGTM2026"
 
     # OpenAI
     openai_api_key: str = ""
@@ -31,4 +40,3 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Return cached settings instance."""
     return Settings()
-

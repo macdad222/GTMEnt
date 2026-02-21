@@ -20,10 +20,10 @@ class LLMSummarizer:
     Generates summaries and insights from data using LLM.
     """
     
-    SUMMARY_CACHE_DIR = "./data/summaries"
-    
     def __init__(self):
-        os.makedirs(self.SUMMARY_CACHE_DIR, exist_ok=True)
+        from src.db_utils import db_load, db_save
+        self._db_load = db_load
+        self._db_save = db_save
     
     def _get_active_llm_config(self) -> Optional[Dict[str, Any]]:
         """Get the active LLM provider configuration."""
@@ -33,13 +33,13 @@ class LLMSummarizer:
                 return {
                     "provider": p.provider,
                     "api_key": p.api_key,
-                    "model": p.model_name,
+                    "model": p.get_default_model(),
                 }
         return None
     
     def _call_openai(self, api_key: str, model: str, prompt: str) -> str:
         """Call OpenAI API."""
-        with httpx.Client(timeout=120.0) as client:
+        with httpx.Client(timeout=600.0) as client:
             response = client.post(
                 "https://api.openai.com/v1/chat/completions",
                 headers={
@@ -52,7 +52,7 @@ class LLMSummarizer:
                         {"role": "system", "content": "You are a senior strategy consultant analyzing enterprise telecommunications and technology markets for Comcast Business. Provide concise, actionable insights."},
                         {"role": "user", "content": prompt}
                     ],
-                    "max_tokens": 2000,
+                    "max_tokens": 25000,
                     "temperature": 0.7,
                 }
             )
@@ -62,7 +62,7 @@ class LLMSummarizer:
     
     def _call_xai(self, api_key: str, model: str, prompt: str) -> str:
         """Call xAI (Grok) API."""
-        with httpx.Client(timeout=120.0) as client:
+        with httpx.Client(timeout=600.0) as client:
             response = client.post(
                 "https://api.x.ai/v1/chat/completions",
                 headers={
@@ -75,7 +75,7 @@ class LLMSummarizer:
                         {"role": "system", "content": "You are a senior strategy consultant analyzing enterprise telecommunications and technology markets for Comcast Business. Provide concise, actionable insights."},
                         {"role": "user", "content": prompt}
                     ],
-                    "max_tokens": 2000,
+                    "max_tokens": 25000,
                     "temperature": 0.7,
                 }
             )
@@ -85,23 +85,25 @@ class LLMSummarizer:
     
     def _call_anthropic(self, api_key: str, model: str, prompt: str) -> str:
         """Call Anthropic (Claude) API."""
-        with httpx.Client(timeout=120.0) as client:
+        with httpx.Client(timeout=600.0) as client:
             response = client.post(
                 "https://api.anthropic.com/v1/messages",
                 headers={
                     "x-api-key": api_key,
                     "Content-Type": "application/json",
-                    "anthropic-version": "2024-01-01",
+                    "anthropic-version": "2023-06-01",
                 },
                 json={
                     "model": model,
-                    "max_tokens": 2000,
+                    "max_tokens": 25000,
                     "system": "You are a senior strategy consultant analyzing enterprise telecommunications and technology markets for Comcast Business. Provide concise, actionable insights.",
                     "messages": [
                         {"role": "user", "content": prompt}
                     ],
                 }
             )
+            if response.status_code != 200:
+                print(f"Anthropic API error {response.status_code}: {response.text[:500]}")
             response.raise_for_status()
             data = response.json()
             return data["content"][0]["text"]
@@ -126,18 +128,12 @@ class LLMSummarizer:
             raise ValueError(f"Unknown LLM provider: {provider}")
     
     def _save_summary(self, source_id: str, summary: Dict[str, Any]):
-        """Save summary to cache."""
-        path = os.path.join(self.SUMMARY_CACHE_DIR, f"{source_id}_summary.json")
-        with open(path, 'w') as f:
-            json.dump(summary, f, indent=2)
+        """Save summary to database."""
+        self._db_save(f"summary_{source_id}", summary)
     
     def _load_summary(self, source_id: str) -> Optional[Dict[str, Any]]:
-        """Load summary from cache."""
-        path = os.path.join(self.SUMMARY_CACHE_DIR, f"{source_id}_summary.json")
-        if os.path.exists(path):
-            with open(path, 'r') as f:
-                return json.load(f)
-        return None
+        """Load summary from database."""
+        return self._db_load(f"summary_{source_id}")
     
     def summarize_data_source(self, source_id: str, source_name: str, data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -221,14 +217,20 @@ Format your response with clear headers and bullet points."""
         return self._load_summary(source_id)
     
     def get_all_summaries(self) -> List[Dict[str, Any]]:
-        """Get all cached summaries."""
+        """Get all cached summaries from database."""
         summaries = []
-        if os.path.exists(self.SUMMARY_CACHE_DIR):
-            for filename in os.listdir(self.SUMMARY_CACHE_DIR):
-                if filename.endswith("_summary.json"):
-                    path = os.path.join(self.SUMMARY_CACHE_DIR, filename)
-                    with open(path, 'r') as f:
-                        summaries.append(json.load(f))
+        try:
+            from src.database import get_db
+            from src.db_models import AppConfigDB
+            with get_db() as db:
+                rows = db.query(AppConfigDB).filter(
+                    AppConfigDB.key.like("summary_%")
+                ).all()
+                for row in rows:
+                    if row.value:
+                        summaries.append(row.value)
+        except Exception as e:
+            print(f"Error loading summaries: {e}")
         return summaries
 
 

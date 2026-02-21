@@ -22,10 +22,10 @@ class MarketResearchService:
     Uses LLM to research and compile market intelligence data.
     """
     
-    RESEARCH_CACHE_DIR = "./data/market_research"
-    
     def __init__(self):
-        os.makedirs(self.RESEARCH_CACHE_DIR, exist_ok=True)
+        from src.db_utils import db_load, db_save
+        self._db_load = db_load
+        self._db_save = db_save
     
     def _get_active_llm_config(self) -> Optional[Dict[str, Any]]:
         """Get the active LLM provider configuration."""
@@ -35,11 +35,11 @@ class MarketResearchService:
                 return {
                     "provider": p.provider,
                     "api_key": p.api_key,
-                    "model": p.model_name,
+                    "model": p.get_default_model(),
                 }
         return None
     
-    def _call_llm(self, system_prompt: str, user_prompt: str, max_tokens: int = 8000) -> str:
+    def _call_llm(self, system_prompt: str, user_prompt: str, max_tokens: int = 25000) -> str:
         """Call the active LLM provider."""
         config = self._get_active_llm_config()
         if not config:
@@ -49,7 +49,7 @@ class MarketResearchService:
         api_key = config["api_key"]
         model = config["model"]
         
-        with httpx.Client(timeout=300.0) as client:
+        with httpx.Client(timeout=600.0) as client:
             if provider == "openai":
                 response = client.post(
                     "https://api.openai.com/v1/chat/completions",
@@ -90,7 +90,7 @@ class MarketResearchService:
                     headers={
                         "x-api-key": api_key,
                         "Content-Type": "application/json",
-                        "anthropic-version": "2024-01-01",
+                        "anthropic-version": "2023-06-01",
                     },
                     json={
                         "model": model,
@@ -104,27 +104,28 @@ class MarketResearchService:
             else:
                 raise ValueError(f"Unknown LLM provider: {provider}")
             
+            if response.status_code != 200:
+                print(f"LLM API error ({provider}) {response.status_code}: {response.text[:500]}")
             response.raise_for_status()
             data = response.json()
             
             if provider == "anthropic":
-                return data["content"][0]["text"]
+                stop_reason = data.get("stop_reason", "unknown")
+                content_text = data["content"][0]["text"]
+                print(f"Anthropic market research response: {len(content_text)} chars, stop_reason={stop_reason}")
+                if stop_reason == "max_tokens":
+                    print("WARNING: Market research response was truncated due to max_tokens limit")
+                return content_text
             else:
                 return data["choices"][0]["message"]["content"]
     
     def _save_research(self, research_id: str, data: Dict[str, Any]):
-        """Save research to cache."""
-        path = os.path.join(self.RESEARCH_CACHE_DIR, f"{research_id}.json")
-        with open(path, 'w') as f:
-            json.dump(data, f, indent=2, default=str)
+        """Save research to database."""
+        self._db_save(f"research_{research_id}", data)
     
     def _load_research(self, research_id: str) -> Optional[Dict[str, Any]]:
-        """Load research from cache."""
-        path = os.path.join(self.RESEARCH_CACHE_DIR, f"{research_id}.json")
-        if os.path.exists(path):
-            with open(path, 'r') as f:
-                return json.load(f)
-        return None
+        """Load research from database."""
+        return self._db_load(f"research_{research_id}")
     
     def get_latest_research(self) -> Optional[Dict[str, Any]]:
         """Get the most recent market research."""
@@ -254,7 +255,7 @@ IMPORTANT REQUIREMENTS:
 Return ONLY the JSON object, no additional text."""
 
         try:
-            response = self._call_llm(system_prompt, user_prompt, max_tokens=8000)
+            response = self._call_llm(system_prompt, user_prompt)
             
             # Extract JSON from response
             json_match = re.search(r'\{[\s\S]*\}', response)

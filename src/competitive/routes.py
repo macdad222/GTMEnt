@@ -1,7 +1,7 @@
 """API routes for Competitive Intelligence."""
 
 from typing import List, Optional
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from datetime import datetime
 
@@ -124,6 +124,8 @@ class AnalysisSummaryResponse(BaseModel):
     created_at: datetime
     competitors_analyzed: List[str]
     executive_summary: str
+    llm_provider: str = ""
+    llm_model: str = ""
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -205,7 +207,7 @@ async def get_competitor(competitor_id: str):
 
 
 @router.post("/competitors", response_model=CompetitorResponse)
-async def add_competitor(request: AddCompetitorRequest, background_tasks: BackgroundTasks):
+async def add_competitor(request: AddCompetitorRequest):
     """Add a new competitor and immediately scrape their website."""
     service = get_competitive_intel_service()
     
@@ -221,11 +223,12 @@ async def add_competitor(request: AddCompetitorRequest, background_tasks: Backgr
         category=category,
     )
     
-    # Automatically scrape the new competitor's website in the background
-    def scrape_new_competitor():
-        service.scrape_competitor(comp.id, force=True)
-    
-    background_tasks.add_task(scrape_new_competitor)
+    from src.tasks.competitive_tasks import scrape_competitor as scrape_task
+    from src.jobs.queue import get_job_queue
+    from src.jobs.models import JobType
+    queue = get_job_queue()
+    scrape_job = queue.create_job(job_type=JobType.COMPETITIVE_SCRAPE, target_id=comp.id, target_name=f"Scrape: {comp.name}")
+    scrape_task.delay(scrape_job.id, comp.id)
     
     return _competitor_to_response(comp)
 
@@ -300,7 +303,7 @@ async def get_competitor_data(competitor_id: str):
 
 
 @router.post("/scrape-all")
-async def scrape_all_competitors(force: bool = False, background_tasks: BackgroundTasks = None):
+async def scrape_all_competitors(force: bool = False):
     """Scrape all competitors and Comcast."""
     service = get_competitive_intel_service()
     
@@ -330,7 +333,6 @@ async def get_comcast_data():
 @router.post("/compare")
 async def generate_comparison(
     request: CompareRequest,
-    background_tasks: BackgroundTasks
 ):
     """
     Generate competitive analysis comparing selected competitors (async).
@@ -338,19 +340,19 @@ async def generate_comparison(
     Returns immediately with a job_id. Poll /api/jobs/{job_id} for status.
     When complete, use /api/competitors/analyses to get the analysis.
     """
+    from src.tasks.competitive_tasks import run_competitive_analysis
+    
     service = get_competitive_intel_service()
     
     if not request.competitor_ids:
         raise HTTPException(status_code=400, detail="Select at least one competitor to compare")
     
-    # Get competitor names for display
     competitor_names = []
     for cid in request.competitor_ids:
         comp = service.get_competitor(cid)
         if comp:
             competitor_names.append(comp.name)
     
-    # Create a job to track progress
     queue = get_job_queue()
     job = queue.create_job(
         job_type=JobType.COMPETITIVE_ANALYSIS,
@@ -359,13 +361,7 @@ async def generate_comparison(
     )
     queue.start_job(job.id)
     
-    # Run analysis in background
-    background_tasks.add_task(
-        _run_competitive_analysis, 
-        job.id, 
-        request.competitor_ids, 
-        request.refresh_scrape
-    )
+    run_competitive_analysis.delay(job.id, request.competitor_ids, request.refresh_scrape)
     
     return {
         "status": "started",
@@ -395,6 +391,8 @@ async def list_analyses(limit: int = 10):
             created_at=analysis.created_at,
             competitors_analyzed=competitor_names,
             executive_summary=analysis.executive_summary[:300] + "..." if len(analysis.executive_summary) > 300 else analysis.executive_summary,
+            llm_provider=getattr(analysis, 'llm_provider', ''),
+            llm_model=getattr(analysis, 'llm_model', ''),
         ))
     
     return results

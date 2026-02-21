@@ -1,7 +1,7 @@
 """API routes for Questions and Insights."""
 
 from typing import List, Optional
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException
 import asyncio
 
 from .models import (
@@ -101,7 +101,6 @@ async def get_insight(insight_id: str):
 @router.post("")
 async def create_insight(
     request: InsightQuestionCreate,
-    background_tasks: BackgroundTasks
 ):
     """
     Create a new insight question and generate LLM response (async).
@@ -136,13 +135,8 @@ async def create_insight(
     )
     queue.start_job(job.id)
     
-    # Run generation in background
-    background_tasks.add_task(
-        _run_insight_generation,
-        job.id,
-        insight_id,
-        request.model_dump()
-    )
+    from src.tasks.insight_tasks import generate_insight
+    generate_insight.delay(job.id, insight_id)
     
     return {
         "status": "started",

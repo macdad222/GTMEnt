@@ -1,7 +1,7 @@
 """API routes for market intelligence and public data sources."""
 
 from typing import List, Optional
-from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from datetime import datetime
 
@@ -315,7 +315,6 @@ async def get_market_research():
 @router.post("/research/generate")
 async def generate_market_research(
     force_refresh: bool = False,
-    background_tasks: BackgroundTasks = None
 ):
     """
     Generate comprehensive market research using LLM.

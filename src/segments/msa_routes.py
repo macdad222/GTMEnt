@@ -1,7 +1,7 @@
 """API routes for MSA geographic segmentation with sales resource planning."""
 
 from typing import List, Optional, Dict, Any
-from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from datetime import datetime
 
@@ -843,7 +843,6 @@ def _intel_to_response(intel: MSAMarketIntel) -> MSAMarketIntelResponse:
 @router.post("/intel/generate-all")
 async def generate_all_msa_intel(
     force: bool = False,
-    background_tasks: BackgroundTasks = None,
 ):
     """
     Generate LLM-powered market intelligence for ALL MSAs (async, sequential).
@@ -890,14 +889,8 @@ async def generate_all_msa_intel(
         )
         jobs_created.append(job)
         
-        # Schedule background task
-        background_tasks.add_task(
-            _run_msa_intel_generation,
-            job.id,
-            msa.code,
-            msa.name,
-            msa_data,
-        )
+        from src.tasks.msa_tasks import generate_msa_intel
+        generate_msa_intel.delay(job.id, msa.code, msa.name, msa_data)
     
     return {
         "status": "started",
@@ -914,7 +907,6 @@ async def generate_all_msa_intel(
 async def generate_msa_intel(
     msa_code: str,
     force: bool = False,
-    background_tasks: BackgroundTasks = None,
 ):
     """
     Generate LLM-powered market intelligence for an MSA (async).
@@ -967,8 +959,8 @@ async def generate_msa_intel(
     )
     queue.start_job(job.id)
     
-    # Run in background
-    background_tasks.add_task(_run_msa_intel_generation, job.id, msa_code, msa.name, msa_data)
+    from src.tasks.msa_tasks import generate_msa_intel as msa_task
+    msa_task.delay(job.id, msa_code, msa.name, msa_data)
     
     return {
         "status": "started",

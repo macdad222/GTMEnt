@@ -13,12 +13,11 @@ from src.api.app import app
 
 
 def main():
-    """Run the FastAPI application."""
+    """Run the FastAPI application (development mode)."""
     uvicorn.run(
         "src.api.app:app",
         host="0.0.0.0",
         port=3700,
-        reload=True,
         log_level="info",
     )
 

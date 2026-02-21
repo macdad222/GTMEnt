@@ -174,6 +174,9 @@ class StrategyReport(BaseModel):
     external_sources_cited: List[str] = Field(default_factory=list)
     assumptions: List[str] = Field(default_factory=list)
     
+    # Raw LLM response preserved for re-parsing
+    raw_llm_response: Optional[str] = None
+    
     # Error handling
     error_message: Optional[str] = None
 

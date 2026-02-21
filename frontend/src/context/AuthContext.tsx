@@ -1,31 +1,24 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { setToken, clearToken, getToken } from '../utils/api';
 
-// Types
 interface User {
   id: string;
-  username: string;
+  email: string;
   name: string;
   role: string;
-  requiresPasswordChange: boolean;
+  is_active: boolean;
 }
 
 interface AuthContextType {
   user: User | null;
   isAuthenticated: boolean;
   isLoading: boolean;
-  login: (username: string, password: string) => Promise<LoginResult>;
+  login: (email: string, password: string) => Promise<AuthResult>;
+  register: (name: string, email: string, password: string) => Promise<AuthResult>;
   logout: () => void;
-  setPassword: (userId: string, password: string, confirmPassword: string) => Promise<SetPasswordResult>;
-  clearPasswordChangeRequired: () => void;
 }
 
-interface LoginResult {
-  success: boolean;
-  message?: string;
-  requiresPasswordChange?: boolean;
-}
-
-interface SetPasswordResult {
+interface AuthResult {
   success: boolean;
   message?: string;
 }
@@ -38,95 +31,88 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Check for existing session on mount
   useEffect(() => {
-    const storedSession = localStorage.getItem(SESSION_KEY);
-    if (storedSession) {
-      try {
-        const userData = JSON.parse(storedSession);
-        setUser(userData);
-      } catch (e) {
-        localStorage.removeItem(SESSION_KEY);
+    const token = getToken();
+    if (token) {
+      fetch('/api/auth/me', {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+        .then((res) => {
+          if (res.ok) return res.json();
+          throw new Error('Invalid token');
+        })
+        .then((data: User) => {
+          setUser(data);
+          localStorage.setItem(SESSION_KEY, JSON.stringify(data));
+        })
+        .catch(() => {
+          clearToken();
+          localStorage.removeItem(SESSION_KEY);
+        })
+        .finally(() => setIsLoading(false));
+    } else {
+      const stored = localStorage.getItem(SESSION_KEY);
+      if (stored) {
+        try {
+          setUser(JSON.parse(stored));
+        } catch {
+          localStorage.removeItem(SESSION_KEY);
+        }
       }
+      setIsLoading(false);
     }
-    setIsLoading(false);
   }, []);
 
-  const login = async (username: string, password: string): Promise<LoginResult> => {
+  const login = async (email: string, password: string): Promise<AuthResult> => {
     try {
-      const response = await fetch('/api/admin/login', {
+      const response = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ email, password }),
       });
 
-      const data = await response.json();
-
-      if (data.success) {
-        const userData: User = {
-          id: data.user_id,
-          username: data.username,
-          name: data.name,
-          role: data.role,
-          requiresPasswordChange: data.requires_password_change || false,
-        };
-        setUser(userData);
-        localStorage.setItem(SESSION_KEY, JSON.stringify(userData));
-        return {
-          success: true,
-          requiresPasswordChange: data.requires_password_change,
-        };
-      } else {
-        return { success: false, message: data.message || 'Login failed' };
+      if (response.ok) {
+        const data = await response.json();
+        setToken(data.access_token);
+        setUser(data.user);
+        localStorage.setItem(SESSION_KEY, JSON.stringify(data.user));
+        return { success: true };
       }
-    } catch (error) {
-      console.error('Login error:', error);
+
+      const err = await response.json();
+      return { success: false, message: err.detail || 'Login failed' };
+    } catch {
+      return { success: false, message: 'Network error. Please try again.' };
+    }
+  };
+
+  const register = async (name: string, email: string, password: string): Promise<AuthResult> => {
+    try {
+      const response = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, email, password }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setToken(data.access_token);
+        setUser(data.user);
+        localStorage.setItem(SESSION_KEY, JSON.stringify(data.user));
+        return { success: true };
+      }
+
+      const err = await response.json();
+      return { success: false, message: err.detail || 'Registration failed' };
+    } catch {
       return { success: false, message: 'Network error. Please try again.' };
     }
   };
 
   const logout = () => {
     setUser(null);
+    clearToken();
     localStorage.removeItem(SESSION_KEY);
-  };
-
-  const setPassword = async (
-    userId: string,
-    password: string,
-    confirmPassword: string
-  ): Promise<SetPasswordResult> => {
-    try {
-      const response = await fetch(`/api/admin/users/${userId}/set-password`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password, confirm_password: confirmPassword }),
-      });
-
-      const data = await response.json();
-
-      if (response.ok) {
-        // Update user to clear requiresPasswordChange
-        if (user) {
-          const updatedUser = { ...user, requiresPasswordChange: false };
-          setUser(updatedUser);
-          localStorage.setItem(SESSION_KEY, JSON.stringify(updatedUser));
-        }
-        return { success: true };
-      } else {
-        return { success: false, message: data.detail || 'Failed to set password' };
-      }
-    } catch (error) {
-      console.error('Set password error:', error);
-      return { success: false, message: 'Network error. Please try again.' };
-    }
-  };
-
-  const clearPasswordChangeRequired = () => {
-    if (user) {
-      const updatedUser = { ...user, requiresPasswordChange: false };
-      setUser(updatedUser);
-      localStorage.setItem(SESSION_KEY, JSON.stringify(updatedUser));
-    }
   };
 
   return (
@@ -136,9 +122,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isAuthenticated: !!user,
         isLoading,
         login,
+        register,
         logout,
-        setPassword,
-        clearPasswordChangeRequired,
       }}
     >
       {children}
@@ -153,4 +138,3 @@ export function useAuth() {
   }
   return context;
 }
-

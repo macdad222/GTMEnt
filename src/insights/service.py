@@ -16,12 +16,14 @@ from .models import (
     InsightsStore,
     DataSourceUsed,
 )
+from src.db_utils import db_load, db_save
 
 
 class InsightsService:
     """Service for managing strategic Q&A insights with LLM."""
     
     _instance: Optional["InsightsService"] = None
+    DB_KEY = "insights"
     
     def __new__(cls):
         if cls._instance is None:
@@ -34,29 +36,23 @@ class InsightsService:
             return
         
         self._initialized = True
-        self._data_dir = Path(os.environ.get("DATA_DIR", "./data"))
-        self._insights_file = self._data_dir / "insights.json"
-        self._data_dir.mkdir(parents=True, exist_ok=True)
-        
         self._store = self._load_store()
     
     def _load_store(self) -> InsightsStore:
-        """Load insights from file."""
-        if self._insights_file.exists():
+        """Load insights from database."""
+        data = db_load(self.DB_KEY)
+        if data:
             try:
-                with open(self._insights_file, "r") as f:
-                    data = json.load(f)
                 return InsightsStore(**data)
             except Exception as e:
                 print(f"Error loading insights: {e}")
         return InsightsStore()
     
     def _save_store(self) -> None:
-        """Save insights to file."""
+        """Save insights to database."""
         self._store.last_updated = datetime.now()
         try:
-            with open(self._insights_file, "w") as f:
-                json.dump(self._store.model_dump(mode="json"), f, indent=2, default=str)
+            db_save(self.DB_KEY, self._store.model_dump(mode="json"))
         except Exception as e:
             print(f"Error saving insights: {e}")
     
@@ -375,7 +371,7 @@ Remember: This analysis may directly influence multi-billion dollar decisions. T
             if active_llm and active_llm.api_key:
                 active_provider = active_llm.provider.value
                 api_key = active_llm.api_key
-                model = active_llm.model_name
+                model = active_llm.get_default_model()
             
             if not active_provider or not api_key:
                 raise ValueError("No active LLM provider configured. Please add an API key in Admin Setup.")
@@ -429,7 +425,7 @@ Please provide a comprehensive, executive-ready analysis addressing this questio
         
         if provider == "xai":
             # Grok API
-            async with httpx.AsyncClient(timeout=180.0) as client:
+            async with httpx.AsyncClient(timeout=600.0) as client:
                 response = await client.post(
                     "https://api.x.ai/v1/chat/completions",
                     headers={
@@ -443,7 +439,7 @@ Please provide a comprehensive, executive-ready analysis addressing this questio
                             {"role": "user", "content": user_prompt}
                         ],
                         "temperature": 0.7,
-                        "max_tokens": 8000,
+                        "max_tokens": 25000,
                     }
                 )
                 response.raise_for_status()
@@ -451,7 +447,7 @@ Please provide a comprehensive, executive-ready analysis addressing this questio
                 return data["choices"][0]["message"]["content"]
         
         elif provider == "openai":
-            async with httpx.AsyncClient(timeout=180.0) as client:
+            async with httpx.AsyncClient(timeout=600.0) as client:
                 response = await client.post(
                     "https://api.openai.com/v1/chat/completions",
                     headers={
@@ -465,7 +461,7 @@ Please provide a comprehensive, executive-ready analysis addressing this questio
                             {"role": "user", "content": user_prompt}
                         ],
                         "temperature": 0.7,
-                        "max_tokens": 8000,
+                        "max_tokens": 25000,
                     }
                 )
                 response.raise_for_status()
@@ -473,7 +469,7 @@ Please provide a comprehensive, executive-ready analysis addressing this questio
                 return data["choices"][0]["message"]["content"]
         
         elif provider == "anthropic":
-            async with httpx.AsyncClient(timeout=180.0) as client:
+            async with httpx.AsyncClient(timeout=600.0) as client:
                 response = await client.post(
                     "https://api.anthropic.com/v1/messages",
                     headers={
@@ -482,17 +478,24 @@ Please provide a comprehensive, executive-ready analysis addressing this questio
                         "Content-Type": "application/json",
                     },
                     json={
-                        "model": model or "claude-3-opus-20240229",
+                        "model": model,
                         "system": system_prompt,
                         "messages": [
                             {"role": "user", "content": user_prompt}
                         ],
-                        "max_tokens": 8000,
+                        "max_tokens": 25000,
                     }
                 )
+                if response.status_code != 200:
+                    print(f"Anthropic API error {response.status_code}: {response.text[:500]}")
                 response.raise_for_status()
                 data = response.json()
-                return data["content"][0]["text"]
+                stop_reason = data.get("stop_reason", "unknown")
+                content_text = data["content"][0]["text"]
+                print(f"Anthropic insights response: {len(content_text)} chars, stop_reason={stop_reason}")
+                if stop_reason == "max_tokens":
+                    print("WARNING: Insights response was truncated due to max_tokens limit")
+                return content_text
         
         else:
             raise ValueError(f"Unsupported LLM provider: {provider}")

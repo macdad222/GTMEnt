@@ -1,7 +1,7 @@
 """API routes for Product Competitiveness and Roadmap analysis."""
 
 from typing import List, Optional
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from datetime import datetime
 
@@ -161,7 +161,6 @@ async def get_intel():
 @router.post("/intel/generate")
 async def generate_intel(
     force: bool = False,
-    background_tasks: BackgroundTasks = None,
 ):
     """
     Generate product competitiveness and roadmap intel using LLM (async).
@@ -189,8 +188,8 @@ async def generate_intel(
     )
     queue.start_job(job.id)
     
-    # Run in background
-    background_tasks.add_task(_run_product_intel_generation, job.id, force)
+    from src.tasks.product_tasks import generate_product_roadmap
+    generate_product_roadmap.delay(job.id, force)
     
     return {
         "status": "started",

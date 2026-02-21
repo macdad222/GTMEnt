@@ -21,37 +21,28 @@ class DataFetcher:
     Fetches data from public API sources.
     """
     
-    CACHE_DIR = "./data/source_cache"
     USER_AGENT = "ComcastBusinessEnterpriseStrategy/1.0 (research platform)"
     
     def __init__(self):
-        os.makedirs(self.CACHE_DIR, exist_ok=True)
+        from src.db_utils import db_load, db_save
+        self._db_load = db_load
+        self._db_save = db_save
         self._client = httpx.Client(
             timeout=60.0,
             headers={"User-Agent": self.USER_AGENT}
         )
     
-    def _get_cache_path(self, source_id: str) -> str:
-        """Get cache file path for a source."""
-        return os.path.join(self.CACHE_DIR, f"{source_id}.json")
-    
     def _save_to_cache(self, source_id: str, data: Dict[str, Any]):
-        """Save fetched data to cache."""
-        cache_path = self._get_cache_path(source_id)
-        with open(cache_path, 'w') as f:
-            json.dump({
-                "source_id": source_id,
-                "fetched_at": datetime.utcnow().isoformat(),
-                "data": data
-            }, f, indent=2, default=str)
+        """Save fetched data to database."""
+        self._db_save(f"source_cache_{source_id}", {
+            "source_id": source_id,
+            "fetched_at": datetime.utcnow().isoformat(),
+            "data": data,
+        })
     
     def _load_from_cache(self, source_id: str) -> Optional[Dict[str, Any]]:
-        """Load data from cache if available."""
-        cache_path = self._get_cache_path(source_id)
-        if os.path.exists(cache_path):
-            with open(cache_path, 'r') as f:
-                return json.load(f)
-        return None
+        """Load data from database cache."""
+        return self._db_load(f"source_cache_{source_id}")
     
     def fetch_sec_edgar(self, cik: str, source_id: str) -> Dict[str, Any]:
         """

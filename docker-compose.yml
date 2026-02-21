@@ -2,6 +2,36 @@
 # Run: docker-compose up -d
 
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: gtm-postgres
+    environment:
+      POSTGRES_DB: gtm_ent
+      POSTGRES_USER: gtm
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-gtm_dev_password}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gtm -d gtm_ent"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: gtm-redis
+    ports:
+      - "6380:6379"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   gtm-platform:
     build:
       context: .
@@ -13,20 +43,49 @@ services:
       - APP_ENV=production
       - LOG_LEVEL=INFO
       - CHROMA_PERSIST_DIR=/app/data/chroma
-      # Add your OpenAI API key for LLM features
-      # - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - DATABASE_URL=postgresql+psycopg2://gtm:${POSTGRES_PASSWORD:-gtm_dev_password}@postgres:5432/gtm_ent
+      - REDIS_URL=redis://redis:6379/0
+      - JWT_SECRET=${JWT_SECRET:-change-me-in-production-use-a-real-secret}
+      - GATE_ACCESS_CODE=${GATE_ACCESS_CODE:-ComcastGTM2026}
     volumes:
-      # Persist all app data (config, cache, ChromaDB)
       - gtm-app-data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3700/api/admin/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
+      start_period: 15s
+
+  celery-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gtm-celery-worker
+    command: celery -A src.celery_app worker --loglevel=info --concurrency=2
+    environment:
+      - APP_ENV=production
+      - DATABASE_URL=postgresql+psycopg2://gtm:${POSTGRES_PASSWORD:-gtm_dev_password}@postgres:5432/gtm_ent
+      - REDIS_URL=redis://redis:6379/0
+      - JWT_SECRET=${JWT_SECRET:-change-me-in-production-use-a-real-secret}
+      - GATE_ACCESS_CODE=${GATE_ACCESS_CODE:-ComcastGTM2026}
+      - CHROMA_PERSIST_DIR=/app/data/chroma
+    volumes:
+      - gtm-app-data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   gtm-app-data:
-    driver: local
-
+    external: true
+    name: gtment_gtm-app-data
+  pgdata:

@@ -17,6 +17,7 @@ from .models import (
     DataSourceLevel,
 )
 from .store import AdminConfigStore
+from src.auth.middleware import get_current_user_optional, require_admin
 
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
@@ -40,6 +41,7 @@ class LLMProviderResponse(BaseModel):
     provider: str
     provider_label: str
     model_name: str
+    available_models: List[dict]
     is_active: bool
     has_key: bool
     masked_key: str
@@ -175,11 +177,32 @@ class ConfigSummaryResponse(BaseModel):
 def _provider_label(provider: LLMProvider) -> str:
     """Get human-readable label for LLM provider."""
     labels = {
-        LLMProvider.OPENAI: "OpenAI (ChatGPT 5.2)",
-        LLMProvider.XAI: "xAI (Grok 4.1)",
+        LLMProvider.OPENAI: "OpenAI (ChatGPT)",
+        LLMProvider.XAI: "xAI (Grok)",
         LLMProvider.ANTHROPIC: "Anthropic (Claude)",
     }
     return labels.get(provider, provider.value)
+
+
+AVAILABLE_MODELS = {
+    LLMProvider.OPENAI: [
+        {"id": "gpt-5.2-turbo", "label": "GPT-5.2 Turbo"},
+        {"id": "gpt-5.2", "label": "GPT-5.2"},
+        {"id": "gpt-4o", "label": "GPT-4o"},
+        {"id": "gpt-4o-mini", "label": "GPT-4o Mini"},
+    ],
+    LLMProvider.XAI: [
+        {"id": "grok-4-1-fast-reasoning", "label": "Grok 4.1 Fast Reasoning"},
+        {"id": "grok-4-1", "label": "Grok 4.1"},
+        {"id": "grok-3", "label": "Grok 3"},
+    ],
+    LLMProvider.ANTHROPIC: [
+        {"id": "claude-sonnet-4-6", "label": "Claude Sonnet 4.6"},
+        {"id": "claude-opus-4", "label": "Claude Opus 4"},
+        {"id": "claude-3.5-sonnet", "label": "Claude 3.5 Sonnet"},
+        {"id": "claude-3-opus", "label": "Claude 3 Opus"},
+    ],
+}
 
 
 def _role_label(role: UserRole) -> str:
@@ -200,6 +223,7 @@ def _llm_config_to_response(config: LLMProviderConfig) -> LLMProviderResponse:
         provider=config.provider.value,
         provider_label=_provider_label(config.provider),
         model_name=config.get_default_model(),
+        available_models=AVAILABLE_MODELS.get(config.provider, []),
         is_active=config.is_active,
         has_key=bool(config.api_key),
         masked_key=config.masked_key if config.api_key else "",

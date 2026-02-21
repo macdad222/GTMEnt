@@ -1,4 +1,4 @@
-"""In-memory store for admin configuration (replace with database in production)."""
+"""Admin configuration store backed by PostgreSQL."""
 
 from datetime import datetime
 from typing import Optional, List
@@ -6,6 +6,8 @@ import json
 import os
 import hashlib
 import secrets
+
+from src.db_utils import db_load, db_save
 
 from .models import (
     User,
@@ -41,14 +43,13 @@ def verify_password(password: str, stored_hash: str) -> bool:
 
 class AdminConfigStore:
     """
-    In-memory store for admin configuration with file persistence.
+    In-memory store for admin configuration backed by PostgreSQL.
     
-    In production, this would be backed by a database with encryption
-    for sensitive fields like API keys.
+    Uses the AppConfigDB key-value table for persistence.
     """
     
     _instance: Optional["AdminConfigStore"] = None
-    CONFIG_FILE = "./data/admin_config.json"
+    DB_KEY = "admin_config"
     
     def __new__(cls):
         """Singleton pattern for config store."""
@@ -64,11 +65,10 @@ class AdminConfigStore:
         self._config = self._load_config() or self._build_default_config()
     
     def _load_config(self) -> Optional[PlatformConfig]:
-        """Load configuration from file."""
+        """Load configuration from database."""
         try:
-            if os.path.exists(self.CONFIG_FILE):
-                with open(self.CONFIG_FILE, 'r') as f:
-                    data = json.load(f)
+            data = db_load(self.DB_KEY)
+            if data:
                 
                 # Reconstruct LLM providers
                 llm_providers = []
@@ -167,10 +167,8 @@ class AdminConfigStore:
         return None
     
     def _save_config(self):
-        """Save configuration to file."""
+        """Save configuration to database."""
         try:
-            os.makedirs(os.path.dirname(self.CONFIG_FILE), exist_ok=True)
-            
             data = {
                 'llm_providers': [
                     {
@@ -228,8 +226,7 @@ class AdminConfigStore:
                 ],
             }
             
-            with open(self.CONFIG_FILE, 'w') as f:
-                json.dump(data, f, indent=2)
+            db_save(self.DB_KEY, data)
         except Exception as e:
             print(f"Warning: Could not save admin config: {e}")
     
@@ -255,7 +252,7 @@ class AdminConfigStore:
                 provider=LLMProvider.ANTHROPIC,
                 api_key="",
                 is_active=False,
-                model_name="claude-3-opus",
+                model_name="claude-sonnet-4-6",
                 test_status=None,
             ),
         ]

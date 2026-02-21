@@ -72,9 +72,12 @@ class PublicDataSourceRegistry:
     when explicitly requested by the user.
     """
     
-    CACHE_FILE = "./data/public_data_cache.json"
+    DB_KEY = "public_data_cache"
     
     def __init__(self):
+        from src.db_utils import db_load, db_save
+        self._db_load = db_load
+        self._db_save = db_save
         self._sources: Dict[str, PublicDataSource] = {}
         self._initialize_sources()
         self._load_cache()
@@ -384,12 +387,10 @@ class PublicDataSourceRegistry:
             self._sources[source.id] = source
     
     def _load_cache(self):
-        """Load cached data from persistent storage."""
+        """Load cached data from database."""
         try:
-            if os.path.exists(self.CACHE_FILE):
-                with open(self.CACHE_FILE, 'r') as f:
-                    cache_data = json.load(f)
-                
+            cache_data = self._db_load(self.DB_KEY)
+            if cache_data:
                 for source_id, cached in cache_data.items():
                     if source_id in self._sources:
                         source = self._sources[source_id]
@@ -401,10 +402,8 @@ class PublicDataSourceRegistry:
             print(f"Warning: Could not load cache: {e}")
     
     def _save_cache(self):
-        """Save cached data to persistent storage."""
+        """Save cached data to database."""
         try:
-            os.makedirs(os.path.dirname(self.CACHE_FILE), exist_ok=True)
-            
             cache_data = {}
             for source_id, source in self._sources.items():
                 if source.last_refresh or source.cached_data:
@@ -415,8 +414,7 @@ class PublicDataSourceRegistry:
                         'error_message': source.error_message,
                     }
             
-            with open(self.CACHE_FILE, 'w') as f:
-                json.dump(cache_data, f, indent=2)
+            self._db_save(self.DB_KEY, cache_data)
         except Exception as e:
             print(f"Warning: Could not save cache: {e}")
     

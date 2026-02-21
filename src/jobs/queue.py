@@ -1,4 +1,4 @@
-"""Job queue for managing async operations."""
+"""Job queue for managing async operations, backed by PostgreSQL."""
 
 from datetime import datetime
 from typing import Dict, List, Optional
@@ -7,16 +7,17 @@ import os
 import threading
 
 from .models import Job, JobStatus, JobType, JobSummary
+from src.db_utils import db_load, db_save
 
 
 class JobQueue:
     """
-    In-memory job queue with persistence.
+    In-memory job queue backed by PostgreSQL.
     
     Tracks all data import, summarization, and deck generation jobs.
     """
     
-    QUEUE_FILE = "./data/job_queue.json"
+    DB_KEY = "job_queue"
     
     def __init__(self):
         self._jobs: Dict[str, Job] = {}
@@ -24,13 +25,11 @@ class JobQueue:
         self._load_queue()
     
     def _load_queue(self):
-        """Load jobs from persistent storage."""
+        """Load jobs from database."""
         try:
-            if os.path.exists(self.QUEUE_FILE):
-                with open(self.QUEUE_FILE, 'r') as f:
-                    data = json.load(f)
+            data = db_load(self.DB_KEY)
+            if data:
                 for job_data in data.get('jobs', []):
-                    # Convert datetime strings back
                     for dt_field in ['created_at', 'started_at', 'completed_at']:
                         if job_data.get(dt_field):
                             job_data[dt_field] = datetime.fromisoformat(job_data[dt_field])
@@ -40,21 +39,17 @@ class JobQueue:
             print(f"Warning: Could not load job queue: {e}")
     
     def _save_queue(self):
-        """Save jobs to persistent storage."""
+        """Save jobs to database."""
         try:
-            os.makedirs(os.path.dirname(self.QUEUE_FILE), exist_ok=True)
-            
             jobs_data = []
             for job in self._jobs.values():
                 job_dict = job.model_dump()
-                # Convert datetime to ISO strings
                 for dt_field in ['created_at', 'started_at', 'completed_at']:
                     if job_dict.get(dt_field):
                         job_dict[dt_field] = job_dict[dt_field].isoformat()
                 jobs_data.append(job_dict)
             
-            with open(self.QUEUE_FILE, 'w') as f:
-                json.dump({'jobs': jobs_data}, f, indent=2, default=str)
+            db_save(self.DB_KEY, {'jobs': jobs_data})
         except Exception as e:
             print(f"Warning: Could not save job queue: {e}")
     
@@ -83,7 +78,8 @@ class JobQueue:
             return job
     
     def get_job(self, job_id: str) -> Optional[Job]:
-        """Get a job by ID."""
+        """Get a job by ID, refreshing from DB for cross-process consistency."""
+        self._load_queue()
         return self._jobs.get(job_id)
     
     def update_job(self, job: Job):
@@ -138,6 +134,7 @@ class JobQueue:
     
     def get_active_jobs(self) -> List[Job]:
         """Get all active (pending or in-progress) jobs."""
+        self._load_queue()
         return [j for j in self._jobs.values() if j.is_active]
     
     def get_jobs_for_target(self, target_id: str) -> List[Job]:
@@ -146,6 +143,7 @@ class JobQueue:
     
     def get_recent_jobs(self, limit: int = 20) -> List[Job]:
         """Get most recent jobs."""
+        self._load_queue()
         sorted_jobs = sorted(
             self._jobs.values(),
             key=lambda j: j.created_at,
@@ -155,6 +153,7 @@ class JobQueue:
     
     def get_summary(self) -> JobSummary:
         """Get summary of job queue."""
+        self._load_queue()
         jobs = list(self._jobs.values())
         
         by_type = {}

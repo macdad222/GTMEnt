@@ -1,13 +1,18 @@
 """FastAPI application factory."""
 
+import logging
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 import os
 
 from .routes import router
 from src.admin.routes import router as admin_router
+from src.auth.routes import router as auth_router
 from src.market_intel.routes import router as market_intel_router
 from src.jobs.routes import router as jobs_router
 from src.segments.msa_routes import router as msa_router
@@ -17,6 +22,12 @@ from src.product_roadmap.routes import router as product_roadmap_router
 from src.insights.routes import router as insights_router
 from src.strategy_report.routes import router as strategy_report_router
 from src.voice.routes import router as voice_router
+from src.database import init_db
+from src.config import get_settings
+
+logger = logging.getLogger(__name__)
+
+limiter = Limiter(key_func=get_remote_address)
 
 
 def create_app() -> FastAPI:
@@ -27,22 +38,37 @@ def create_app() -> FastAPI:
             "A role-based platform for generating BCG/Altman-style enterprise strategy decks "
             "and segment playbooks for Comcast Business Enterprise."
         ),
-        version="0.1.0",
+        version="0.2.0",
         docs_url="/api/docs",
         redoc_url="/api/redoc",
     )
 
-    # CORS middleware
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+    settings = get_settings()
+    allowed_origins = ["*"] if settings.app_env == "development" else [
+        "http://localhost:3700",
+        "https://localhost:3700",
+    ]
+
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],  # Configure appropriately for production
+        allow_origins=allowed_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
 
+    @app.on_event("startup")
+    def on_startup():
+        logger.info("Initializing database tables...")
+        init_db()
+        logger.info("Database initialized.")
+
     # API routes
     app.include_router(router, prefix="/api")
+    app.include_router(auth_router, prefix="/api")
     app.include_router(admin_router, prefix="/api")
     app.include_router(market_intel_router, prefix="/api")
     app.include_router(jobs_router, prefix="/api")

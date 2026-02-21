@@ -39,6 +39,7 @@ interface LLMProvider {
   provider: string
   provider_label: string
   model_name: string
+  available_models: {id: string, label: string}[]
   is_active: boolean
   has_key: boolean
   masked_key: string
@@ -368,7 +369,7 @@ export function AdminSetup() {
   }
 
   // LLM Provider actions
-  const updateLLMProvider = async (provider: string, updates: { api_key?: string; is_active?: boolean }) => {
+  const updateLLMProvider = async (provider: string, updates: { api_key?: string; is_active?: boolean; model_name?: string }) => {
     try {
       const res = await fetch(`/api/admin/llm-providers/${provider}`, {
         method: 'PUT',
@@ -814,57 +815,87 @@ export function AdminSetup() {
               {llmProviders.map((provider) => (
                 <div
                   key={provider.provider}
-                  className={`p-4 rounded-lg border ${
+                  className={`p-4 rounded-lg border transition-all ${
                     provider.is_active
                       ? 'border-brand-500/50 bg-brand-500/10'
                       : 'border-white/10 bg-white/5'
                   }`}
                 >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-4">
-                      <div className={`h-3 w-3 rounded-full ${
-                        provider.is_active ? 'bg-brand-400' : 'bg-slate-600'
-                      }`} />
-                      <div>
-                        <p className="font-medium text-white">{provider.provider_label}</p>
-                        <p className="text-xs text-slate-400">Model: {provider.model_name}</p>
+                  <div className="flex items-center justify-between gap-4">
+                    {/* Left: Active toggle + provider name */}
+                    <div className="flex items-center gap-4 min-w-0">
+                      <button
+                        onClick={() => {
+                          if (!provider.is_active && provider.has_key) {
+                            updateLLMProvider(provider.provider, { is_active: true })
+                          }
+                        }}
+                        disabled={!provider.has_key}
+                        className={`relative flex-shrink-0 w-11 h-6 rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 focus:ring-offset-slate-900 ${
+                          provider.is_active
+                            ? 'bg-brand-500'
+                            : provider.has_key
+                              ? 'bg-slate-600 hover:bg-slate-500 cursor-pointer'
+                              : 'bg-slate-700 opacity-50 cursor-not-allowed'
+                        }`}
+                        title={
+                          provider.is_active
+                            ? 'Currently active'
+                            : provider.has_key
+                              ? 'Click to set as active provider'
+                              : 'Add an API key first'
+                        }
+                      >
+                        <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${
+                          provider.is_active ? 'translate-x-5' : 'translate-x-0'
+                        }`} />
+                      </button>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="font-medium text-white">{provider.provider_label}</p>
+                          {provider.is_active && (
+                            <span className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-brand-300 bg-brand-500/20 rounded-full">
+                              Active
+                            </span>
+                          )}
+                        </div>
+                        {provider.has_key && (
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <span className="text-xs text-slate-500 font-mono">{provider.masked_key}</span>
+                            {provider.test_status === 'success' && (
+                              <span className="flex items-center gap-1 text-[10px] text-emerald-400">
+                                <CheckCircleIcon className="h-3 w-3" /> Verified
+                              </span>
+                            )}
+                            {provider.test_status === 'failed' && (
+                              <span className="flex items-center gap-1 text-[10px] text-red-400">
+                                <XCircleIcon className="h-3 w-3" /> Failed
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-3">
-                      {/* Test status */}
-                      {provider.test_status === 'success' && (
-                        <span className="flex items-center gap-1 text-xs text-emerald-400">
-                          <CheckCircleIcon className="h-4 w-4" /> Verified
-                        </span>
-                      )}
-                      {provider.test_status === 'failed' && (
-                        <span className="flex items-center gap-1 text-xs text-red-400">
-                          <XCircleIcon className="h-4 w-4" /> Failed
-                        </span>
-                      )}
-
-                      {/* API Key display */}
-                      {provider.has_key && (
-                        <span className="text-xs text-slate-500 font-mono">
-                          {provider.masked_key}
-                        </span>
-                      )}
-
-                      {/* Actions */}
-                      {!provider.is_active && provider.has_key && (
-                        <button
-                          onClick={() => updateLLMProvider(provider.provider, { is_active: true })}
-                          className="px-3 py-1 text-xs font-medium text-brand-400 bg-brand-500/20 rounded-lg hover:bg-brand-500/30"
-                        >
-                          Set Active
-                        </button>
-                      )}
+                    {/* Right: Model selector + action buttons */}
+                    <div className="flex items-center gap-3 flex-shrink-0">
+                      <select
+                        value={provider.model_name}
+                        onChange={(e) => updateLLMProvider(provider.provider, { model_name: e.target.value })}
+                        className="px-3 py-1.5 text-xs font-medium text-slate-200 bg-white/10 border border-white/10 rounded-lg hover:bg-white/20 focus:outline-none focus:ring-2 focus:ring-brand-500 appearance-none cursor-pointer pr-7"
+                        style={{ backgroundImage: "url(\"data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e\")", backgroundPosition: 'right 0.3rem center', backgroundRepeat: 'no-repeat', backgroundSize: '1.2em 1.2em' }}
+                      >
+                        {provider.available_models.map((model) => (
+                          <option key={model.id} value={model.id} className="bg-slate-800 text-white">
+                            {model.label}
+                          </option>
+                        ))}
+                      </select>
 
                       <button
                         onClick={() => testLLMProvider(provider.provider)}
                         disabled={!provider.has_key || testing === provider.provider}
-                        className="px-3 py-1 text-xs font-medium text-slate-300 bg-white/10 rounded-lg hover:bg-white/20 disabled:opacity-50"
+                        className="px-3 py-1.5 text-xs font-medium text-slate-300 bg-white/10 rounded-lg hover:bg-white/20 disabled:opacity-50"
                       >
                         {testing === provider.provider ? (
                           <ArrowPathIcon className="h-4 w-4 animate-spin" />
@@ -877,7 +908,7 @@ export function AdminSetup() {
                         onClick={() => setEditingProvider(
                           editingProvider === provider.provider ? null : provider.provider
                         )}
-                        className="px-3 py-1 text-xs font-medium text-slate-300 bg-white/10 rounded-lg hover:bg-white/20"
+                        className="px-3 py-1.5 text-xs font-medium text-slate-300 bg-white/10 rounded-lg hover:bg-white/20"
                       >
                         {provider.has_key ? 'Update Key' : 'Add Key'}
                       </button>

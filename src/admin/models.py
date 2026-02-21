@@ -41,7 +41,7 @@ class LLMProvider(str, Enum):
     """Supported LLM providers."""
     OPENAI = "openai"       # ChatGPT 5.2
     XAI = "xai"             # Grok 4.1
-    ANTHROPIC = "anthropic" # Claude (future)
+    ANTHROPIC = "anthropic" # Claude
 
 
 class VoiceProvider(str, Enum):
@@ -125,7 +125,7 @@ class LLMProviderConfig(BaseModel):
         defaults = {
             LLMProvider.OPENAI: "gpt-5.2-turbo",
             LLMProvider.XAI: "grok-4-1-fast-reasoning",
-            LLMProvider.ANTHROPIC: "claude-3-opus",
+            LLMProvider.ANTHROPIC: "claude-sonnet-4-6",
         }
         return defaults.get(self.provider, "unknown")
 

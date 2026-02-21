@@ -69,6 +69,8 @@ interface AnalysisSummary {
   created_at: string;
   competitors_analyzed: string[];
   executive_summary: string;
+  llm_provider?: string;
+  llm_model?: string;
 }
 
 // Category icon mapping
@@ -447,95 +449,157 @@ interface ParsedRecommendation {
   rationale?: string;
   successMetric?: string;
   complexity?: string;
+  complexityDetail?: string;
 }
 
 function parseRecommendation(rec: string): ParsedRecommendation {
-  // Try to parse structured format: **[1] Title** \n Action: ... \n Rationale: ...
-  const titleMatch = rec.match(/^\*?\*?\[?(\d+)\]?\*?\*?\s*\*?\*?([^*\n]+)/);
-  const priority = titleMatch ? parseInt(titleMatch[1]) : 0;
-  const title = titleMatch ? titleMatch[2].trim() : rec.split('\n')[0].replace(/\*\*/g, '').trim();
-  
-  const actionMatch = rec.match(/Action:\s*(.+?)(?=\n|Rationale:|Success|Complexity:|$)/is);
-  const rationaleMatch = rec.match(/Rationale:\s*(.+?)(?=\n|Action:|Success|Complexity:|$)/is);
-  const metricMatch = rec.match(/Success\s*Metric:\s*(.+?)(?=\n|Action:|Rationale:|Complexity:|$)/is);
-  const complexityMatch = rec.match(/Complexity:\s*(.+?)(?=\n|$)/is);
-  
-  return {
-    title,
-    priority,
-    action: actionMatch?.[1]?.trim(),
-    rationale: rationaleMatch?.[1]?.trim(),
-    successMetric: metricMatch?.[1]?.trim(),
-    complexity: complexityMatch?.[1]?.trim()?.replace(/[\.\*]/g, ''),
-  };
+  const lines = rec.split('\n').map(l => l.trim()).filter(l => l && l !== '---');
+
+  let title = '';
+  let priority = 0;
+  let action: string | undefined;
+  let rationale: string | undefined;
+  let successMetric: string | undefined;
+  let complexity: string | undefined;
+  let complexityDetail: string | undefined;
+
+  for (const line of lines) {
+    const titleMatch = line.match(/^\d+\.\s*\[Priority\s*(\d+)\]\s*\*\*(.+?)\*\*/i);
+    if (titleMatch) {
+      priority = parseInt(titleMatch[1]);
+      title = titleMatch[2].trim();
+      continue;
+    }
+
+    if (!title) {
+      const boldMatch = line.match(/\*\*(.+?)\*\*/);
+      if (boldMatch) {
+        title = boldMatch[1].trim();
+        const priMatch = line.match(/\[?Priority\s*(\d+)\]?|\[(\d+)\]|^(\d+)\./i);
+        if (priMatch) priority = parseInt(priMatch[1] || priMatch[2] || priMatch[3]);
+        continue;
+      }
+      title = line.replace(/\*\*/g, '').replace(/^\d+\.\s*/, '').trim();
+      continue;
+    }
+
+    const fieldMatch = line.match(/^[•\-*]?\s*\*\*([^*:]+)\*\*:?\s*(.+)/);
+    if (fieldMatch) {
+      const label = fieldMatch[1].trim().toLowerCase();
+      const value = fieldMatch[2].replace(/\*\*/g, '').trim();
+
+      if (label === 'action') action = value;
+      else if (label === 'rationale') rationale = value;
+      else if (label.includes('success') || label.includes('metric')) successMetric = value;
+      else if (label === 'complexity') {
+        const cleaned = value.replace(/[🟢🟡🔴⚪️]/gu, '').trim();
+        const dashIdx = cleaned.indexOf('—');
+        if (dashIdx > 0) {
+          complexity = cleaned.substring(0, dashIdx).trim();
+          complexityDetail = cleaned.substring(dashIdx + 1).trim();
+        } else {
+          complexity = cleaned;
+        }
+      }
+      continue;
+    }
+
+    const plainMatch = line.match(/^[•\-*]?\s*(Action|Rationale|Success\s*Metric|Complexity):\s*(.+)/i);
+    if (plainMatch) {
+      const label = plainMatch[1].toLowerCase();
+      const value = plainMatch[2].replace(/\*\*/g, '').trim();
+      if (label === 'action') action = value;
+      else if (label === 'rationale') rationale = value;
+      else if (label.includes('success')) successMetric = value;
+      else if (label === 'complexity') complexity = value.replace(/[🟢🟡🔴⚪️]/gu, '').replace(/\s*—.*/, '').trim();
+    }
+  }
+
+  return { title, priority, action, rationale, successMetric, complexity, complexityDetail };
 }
 
 // Styled Recommendation Card
 const RecommendationCard: React.FC<{ rec: string; index: number }> = ({ rec, index }) => {
   const parsed = parseRecommendation(rec);
-  
-  const complexityColors: Record<string, string> = {
-    'low': 'bg-green-500/20 text-green-400 border-green-500/30',
-    'medium': 'bg-amber-500/20 text-amber-400 border-amber-500/30',
-    'high': 'bg-red-500/20 text-red-400 border-red-500/30',
+
+  const complexityConfig: Record<string, { badge: string; accent: string }> = {
+    'low': { badge: 'bg-green-500/20 text-green-400 border-green-500/30', accent: 'text-green-400' },
+    'medium': { badge: 'bg-amber-500/20 text-amber-400 border-amber-500/30', accent: 'text-amber-400' },
+    'high': { badge: 'bg-red-500/20 text-red-400 border-red-500/30', accent: 'text-red-400' },
   };
-  
-  const complexityClass = complexityColors[parsed.complexity?.toLowerCase() || 'medium'] || complexityColors.medium;
-  
+
+  const cKey = Object.keys(complexityConfig).find(k => (parsed.complexity || '').toLowerCase().includes(k)) || 'medium';
+  const cStyle = complexityConfig[cKey];
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: index * 0.08 }}
-      className="bg-gradient-to-br from-slate-800/80 to-slate-900/50 rounded-xl border border-emerald-500/20 overflow-hidden hover:border-emerald-500/40 transition-all"
+      className="p-4 bg-gradient-to-br from-emerald-900/20 to-slate-800/50 rounded-xl border border-emerald-500/20 hover:border-emerald-500/40 transition-all"
     >
-      {/* Header */}
-      <div className="flex items-center gap-3 px-4 py-3 bg-emerald-500/10 border-b border-emerald-500/20">
-        <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gradient-to-br from-emerald-500 to-emerald-600 flex items-center justify-center text-white font-bold text-sm shadow-lg">
-          {index + 1}
+      {/* Title Row */}
+      <div className="flex items-start gap-3 mb-3">
+        <div className="flex-shrink-0 w-7 h-7 rounded-full bg-gradient-to-br from-emerald-500 to-emerald-600 flex items-center justify-center text-white font-bold text-xs shadow-lg">
+          {parsed.priority || index + 1}
         </div>
-        <h4 className="font-semibold text-white flex-1">{parsed.title}</h4>
+        <div className="flex-1 min-w-0">
+          <h4 className="font-semibold text-emerald-300">{parsed.title}</h4>
+        </div>
         {parsed.complexity && (
-          <span className={`px-2 py-1 text-xs rounded-full border ${complexityClass}`}>
+          <span className={`flex-shrink-0 px-2 py-0.5 text-xs rounded-full border ${cStyle.badge}`}>
             {parsed.complexity}
           </span>
         )}
       </div>
-      
-      {/* Body */}
-      <div className="p-4 space-y-3">
-        {parsed.action && (
-          <div className="flex items-start gap-2">
-            <BoltIcon className="h-4 w-4 text-blue-400 mt-0.5 flex-shrink-0" />
-            <div>
-              <span className="text-xs text-blue-400 uppercase tracking-wide">Action</span>
-              <p className="text-slate-300 text-sm">{parsed.action}</p>
-            </div>
+
+      {/* Action */}
+      {parsed.action && (
+        <div className="flex items-start gap-2 mb-2.5">
+          <BoltIcon className="h-4 w-4 text-blue-400 mt-0.5 flex-shrink-0" />
+          <div>
+            <span className="text-xs font-medium text-blue-400 uppercase tracking-wide">Action</span>
+            <p className="text-slate-300 text-sm leading-relaxed">{parsed.action}</p>
           </div>
-        )}
-        {parsed.rationale && (
-          <div className="flex items-start gap-2">
-            <LightBulbIcon className="h-4 w-4 text-amber-400 mt-0.5 flex-shrink-0" />
-            <div>
-              <span className="text-xs text-amber-400 uppercase tracking-wide">Rationale</span>
-              <p className="text-slate-300 text-sm">{parsed.rationale}</p>
-            </div>
+        </div>
+      )}
+
+      {/* Rationale */}
+      {parsed.rationale && (
+        <div className="flex items-start gap-2 mb-2.5">
+          <LightBulbIcon className="h-4 w-4 text-amber-400 mt-0.5 flex-shrink-0" />
+          <div>
+            <span className="text-xs font-medium text-amber-400 uppercase tracking-wide">Rationale</span>
+            <p className="text-slate-300 text-sm leading-relaxed">{parsed.rationale}</p>
           </div>
-        )}
-        {parsed.successMetric && (
-          <div className="flex items-start gap-2">
-            <ArrowTrendingUpIcon className="h-4 w-4 text-green-400 mt-0.5 flex-shrink-0" />
-            <div>
-              <span className="text-xs text-green-400 uppercase tracking-wide">Success Metric</span>
-              <p className="text-slate-300 text-sm">{parsed.successMetric}</p>
+        </div>
+      )}
+
+      {/* Bottom Row: Success Metric + Complexity Detail */}
+      {(parsed.successMetric || parsed.complexityDetail) && (
+        <div className="mt-3 pt-3 border-t border-emerald-500/10 space-y-2">
+          {parsed.successMetric && (
+            <div className="flex items-start gap-2">
+              <ArrowTrendingUpIcon className="h-4 w-4 text-green-400 mt-0.5 flex-shrink-0" />
+              <div>
+                <span className="text-xs font-medium text-green-400 uppercase tracking-wide">Success Metric</span>
+                <p className="text-slate-400 text-sm">{parsed.successMetric}</p>
+              </div>
             </div>
-          </div>
-        )}
-        {/* If no structured data, show the raw text */}
-        {!parsed.action && !parsed.rationale && (
-          <p className="text-slate-300">{rec}</p>
-        )}
-      </div>
+          )}
+          {parsed.complexityDetail && (
+            <div className="flex items-start gap-2">
+              <ExclamationTriangleIcon className={`h-4 w-4 ${cStyle.accent} mt-0.5 flex-shrink-0`} />
+              <p className="text-slate-500 text-xs italic">{parsed.complexityDetail}</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Fallback for unstructured recommendations */}
+      {!parsed.action && !parsed.rationale && (
+        <p className="text-slate-300 text-sm ml-10">{rec.replace(/\*\*/g, '').replace(/^[\d.]+\s*/, '')}</p>
+      )}
     </motion.div>
   );
 };
@@ -544,25 +608,76 @@ const RecommendationCard: React.FC<{ rec: string; index: number }> = ({ rec, ind
 interface ParsedOpportunity {
   title: string;
   description: string;
-  details: string[];
+  details: { label: string; value: string }[];
 }
 
 function parseOpportunity(opp: string): ParsedOpportunity {
-  // Try to parse: "1. **Title**: Description\n- Detail 1\n- Detail 2"
-  const titleMatch = opp.match(/^\d+\.\s*\*?\*?([^*:]+)\*?\*?:\s*(.+?)(?=\n-|\n\*|$)/s);
-  const title = titleMatch ? titleMatch[1].trim() : opp.split(':')[0].replace(/^\d+\.\s*\*?\*?/, '').replace(/\*?\*?$/, '').trim();
-  const description = titleMatch ? titleMatch[2].trim() : opp.split('\n')[0].replace(/^\d+\.\s*\*?\*?[^:]+:\s*/, '').trim();
-  
-  // Extract bullet points
-  const bulletMatches = opp.match(/[-*]\s+\*?\*?([^:]+):\s*(.+)/g) || [];
-  const details = bulletMatches.map(b => b.replace(/^[-*]\s*\*?\*?/, '').trim());
-  
+  const lines = opp.split('\n').map(l => l.trim()).filter(l => l && l !== '---');
+
+  let title = '';
+  let description = '';
+  const details: { label: string; value: string }[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    if (i === 0) {
+      title = line
+        .replace(/^Opportunity\s*\d+:\s*/i, '')
+        .replace(/^\d+\.\s*/, '')
+        .replace(/\*\*/g, '')
+        .trim();
+      continue;
+    }
+
+    // Labeled detail: "**Label:** value" or "- **Label:** value"
+    const labeledMatch = line.match(/^[•\-*]?\s*\*\*([^*:]+)\*\*:?\s*(.+)/);
+    if (labeledMatch) {
+      const label = labeledMatch[1].trim().replace(/:$/, '');
+      const value = labeledMatch[2].replace(/\*\*/g, '').trim();
+      if (label.toLowerCase() === 'description') {
+        description = value;
+      } else {
+        details.push({ label, value });
+      }
+      continue;
+    }
+
+    // Bullet with label: "- Label: value"
+    const bulletMatch = line.match(/^[•\-*]\s*([^:]+):\s*(.+)/);
+    if (bulletMatch) {
+      details.push({ label: bulletMatch[1].trim(), value: bulletMatch[2].trim() });
+      continue;
+    }
+
+    if (!description) {
+      description = line.replace(/\*\*/g, '');
+    } else {
+      description += ' ' + line.replace(/\*\*/g, '');
+    }
+  }
+
   return { title, description, details };
 }
 
 // Styled Opportunity Card
 const OpportunityCard: React.FC<{ opp: string; index: number }> = ({ opp, index }) => {
   const parsed = parseOpportunity(opp);
+  
+  // Map detail labels to icons and colors
+  const detailStyles: Record<string, { icon: React.ElementType; color: string }> = {
+    'target': { icon: BuildingOffice2Icon, color: 'text-blue-400' },
+    'customer': { icon: BuildingOffice2Icon, color: 'text-blue-400' },
+    'segment': { icon: BuildingOffice2Icon, color: 'text-blue-400' },
+    'impact': { icon: BoltIcon, color: 'text-amber-400' },
+    'time': { icon: ClockIcon, color: 'text-emerald-400' },
+    'implement': { icon: ClockIcon, color: 'text-emerald-400' },
+  };
+  
+  const getDetailStyle = (label: string) => {
+    const key = Object.keys(detailStyles).find(k => label.toLowerCase().includes(k));
+    return key ? detailStyles[key] : { icon: CheckCircleIcon, color: 'text-cyan-400' };
+  };
   
   return (
     <motion.div
@@ -577,16 +692,25 @@ const OpportunityCard: React.FC<{ opp: string; index: number }> = ({ opp, index 
         </div>
         <h4 className="font-semibold text-cyan-300">{parsed.title}</h4>
       </div>
-      <p className="text-slate-300 text-sm mb-2">{parsed.description}</p>
+      {parsed.description && (
+        <p className="text-slate-300 text-sm mb-3">{parsed.description}</p>
+      )}
       {parsed.details.length > 0 && (
-        <ul className="space-y-1 ml-2">
-          {parsed.details.map((detail, i) => (
-            <li key={i} className="flex items-start gap-2 text-sm text-slate-400">
-              <span className="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-cyan-400 mt-1.5"></span>
-              <span>{detail}</span>
-            </li>
-          ))}
-        </ul>
+        <div className="space-y-2 ml-2">
+          {parsed.details.map((detail, i) => {
+            const style = getDetailStyle(detail.label);
+            const DetailIcon = style.icon;
+            return (
+              <div key={i} className="flex items-start gap-2 text-sm">
+                <DetailIcon className={`h-4 w-4 mt-0.5 flex-shrink-0 ${style.color}`} />
+                <div>
+                  <span className={`font-medium ${style.color}`}>{detail.label}:</span>{' '}
+                  <span className="text-slate-300">{detail.value}</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       )}
     </motion.div>
   );
@@ -595,27 +719,58 @@ const OpportunityCard: React.FC<{ opp: string; index: number }> = ({ opp, index 
 // Parse threat string
 interface ParsedThreat {
   title: string;
+  description: string;
   details: { label: string; value: string }[];
 }
 
 function parseThreat(threat: string): ParsedThreat {
-  // Try to parse: "1. **Title**: Description\n- **Competitor**: X\n- **Severity**: Y"
-  const titleMatch = threat.match(/^\d+\.\s*\*?\*?([^*:\n]+)\*?\*?:\s*(.+?)(?=\n|$)/);
-  const title = titleMatch 
-    ? `${titleMatch[1].trim()}: ${titleMatch[2].trim().substring(0, 60)}${titleMatch[2].length > 60 ? '...' : ''}`
-    : threat.split('\n')[0].replace(/^\d+\.\s*\*?\*?/, '').replace(/\*?\*?/, '').trim().substring(0, 80);
-  
-  // Extract labeled bullet points
+  const lines = threat.split('\n').map(l => l.trim()).filter(l => l && l !== '---');
+
+  let title = '';
+  let description = '';
   const details: { label: string; value: string }[] = [];
-  const bulletMatches = threat.match(/[-*]\s+\*?\*?([^:]+)\*?\*?:\s*(.+)/g) || [];
-  for (const bullet of bulletMatches) {
-    const match = bullet.match(/[-*]\s*\*?\*?([^:*]+)\*?\*?:\s*(.+)/);
-    if (match) {
-      details.push({ label: match[1].trim(), value: match[2].trim() });
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    if (i === 0) {
+      title = line
+        .replace(/^Threat\s*\d+:\s*/i, '')
+        .replace(/^\d+\.\s*/, '')
+        .replace(/\*\*/g, '')
+        .trim();
+      if (title.length > 100) title = title.substring(0, 97) + '...';
+      continue;
+    }
+
+    // Labeled detail: "**Label:** value" or "- **Label:** value"
+    const labeledMatch = line.match(/^[•\-*]?\s*\*\*([^*:]+)\*\*:?\s*(.+)/);
+    if (labeledMatch) {
+      const label = labeledMatch[1].trim().replace(/:$/, '');
+      const value = labeledMatch[2].replace(/\*\*/g, '').trim();
+      if (label.toLowerCase() === 'description') {
+        description = value;
+      } else {
+        details.push({ label, value });
+      }
+      continue;
+    }
+
+    // Bullet with label: "- Label: value"
+    const bulletMatch = line.match(/^[•\-*]\s*([^:]+):\s*(.+)/);
+    if (bulletMatch) {
+      details.push({ label: bulletMatch[1].trim(), value: bulletMatch[2].trim() });
+      continue;
+    }
+
+    if (!description) {
+      description = line.replace(/\*\*/g, '');
+    } else {
+      description += ' ' + line.replace(/\*\*/g, '');
     }
   }
-  
-  return { title, details };
+
+  return { title, description, details };
 }
 
 // Styled Threat Card
@@ -623,13 +778,31 @@ const ThreatCard: React.FC<{ threat: string; index: number }> = ({ threat, index
   const parsed = parseThreat(threat);
   
   const severityColors: Record<string, string> = {
+    'critical': 'text-red-500 font-bold',
     'high': 'text-red-400',
     'medium': 'text-amber-400',
     'low': 'text-green-400',
   };
   
-  const severityDetail = parsed.details.find(d => d.label.toLowerCase() === 'severity');
-  const severityColor = severityDetail ? (severityColors[severityDetail.value.toLowerCase()] || 'text-red-400') : 'text-red-400';
+  // Find severity in details
+  const severityDetail = parsed.details.find(d => d.label.toLowerCase().includes('severity'));
+  const severityValue = severityDetail?.value.toLowerCase() || 'high';
+  const severityColor = Object.keys(severityColors).find(k => severityValue.includes(k)) || 'high';
+  const titleColor = severityColors[severityColor] || 'text-red-400';
+  
+  // Map detail labels to icons
+  const detailIcons: Record<string, React.ElementType> = {
+    'competitor': BuildingOffice2Icon,
+    'severity': ShieldExclamationIcon,
+    'defensive': ShieldExclamationIcon,
+    'action': BoltIcon,
+    'recommended': LightBulbIcon,
+  };
+  
+  const getDetailIcon = (label: string): React.ElementType => {
+    const key = Object.keys(detailIcons).find(k => label.toLowerCase().includes(k));
+    return key ? detailIcons[key] : ExclamationTriangleIcon;
+  };
   
   return (
     <motion.div
@@ -642,18 +815,30 @@ const ThreatCard: React.FC<{ threat: string; index: number }> = ({ threat, index
         <div className="flex-shrink-0 w-7 h-7 rounded-full bg-gradient-to-br from-red-500 to-red-600 flex items-center justify-center text-white font-bold text-xs shadow-lg">
           {index + 1}
         </div>
-        <h4 className={`font-semibold ${severityColor}`}>{parsed.title}</h4>
+        <div className="flex-1">
+          <h4 className={`font-semibold ${titleColor}`}>{parsed.title}</h4>
+          {parsed.description && (
+            <p className="text-slate-300 text-sm mt-1">{parsed.description}</p>
+          )}
+        </div>
       </div>
       {parsed.details.length > 0 && (
-        <div className="space-y-1 ml-2">
-          {parsed.details.map((detail, i) => (
-            <div key={i} className="flex items-start gap-2 text-sm">
-              <span className="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-red-400 mt-1.5"></span>
-              <span className="text-slate-400">
-                <span className="text-red-300 font-medium">{detail.label}:</span> {detail.value}
-              </span>
-            </div>
-          ))}
+        <div className="space-y-2 ml-2">
+          {parsed.details.map((detail, i) => {
+            const DetailIcon = getDetailIcon(detail.label);
+            const isSeverity = detail.label.toLowerCase().includes('severity');
+            const valueColor = isSeverity ? (severityColors[detail.value.toLowerCase()] || 'text-red-300') : 'text-slate-300';
+            
+            return (
+              <div key={i} className="flex items-start gap-2 text-sm">
+                <DetailIcon className={`h-4 w-4 mt-0.5 flex-shrink-0 ${isSeverity ? 'text-red-400' : 'text-slate-500'}`} />
+                <div>
+                  <span className="text-red-300 font-medium">{detail.label}:</span>{' '}
+                  <span className={valueColor}>{detail.value}</span>
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
     </motion.div>
@@ -1036,7 +1221,7 @@ export function CompetitiveIntel() {
 
   const fetchAnalyses = async () => {
     try {
-      const res = await fetch('/api/competitive/analyses');
+      const res = await fetch('/api/competitive/analyses?limit=50');
       if (res.ok) {
         setRecentAnalyses(await res.json());
       }
@@ -1544,6 +1729,31 @@ export function CompetitiveIntel() {
                           )}
                         </div>
 
+                        {/* Analysis Status */}
+                        {(() => {
+                          const analysis = getAnalysisForCompetitor(comp.name);
+                          if (!analysis) return null;
+                          const modelLabel = analysis.llm_model
+                            ? analysis.llm_model.split('-').slice(0, 2).join('-')
+                            : analysis.llm_provider || '';
+                          const providerColors: Record<string, string> = {
+                            anthropic: 'bg-orange-500/15 text-orange-400 border-orange-500/30',
+                            xai: 'bg-blue-500/15 text-blue-400 border-blue-500/30',
+                          };
+                          const pColor = providerColors[analysis.llm_provider || ''] || 'bg-slate-700 text-slate-400 border-slate-600';
+                          return (
+                            <div className="mt-2 flex items-center gap-2 flex-wrap">
+                              <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium rounded border ${pColor}`}>
+                                <SparklesIcon className="h-3 w-3" />
+                                {modelLabel}
+                              </span>
+                              <span className="text-[10px] text-slate-500">
+                                Analyzed {new Date(analysis.created_at).toLocaleDateString()}
+                              </span>
+                            </div>
+                          );
+                        })()}
+
                         {/* Quick Actions */}
                         <div className="mt-3 pt-3 border-t border-slate-700/50 flex items-center gap-2">
                           {getAnalysisForCompetitor(comp.name) ? (
@@ -1622,6 +1832,15 @@ export function CompetitiveIntel() {
                     <span className="text-xs text-slate-400">
                       {new Date(a.created_at).toLocaleDateString()}
                     </span>
+                    {a.llm_provider && (
+                      <span className={`px-1.5 py-0.5 text-[10px] font-medium rounded border ${
+                        a.llm_provider === 'anthropic'
+                          ? 'bg-orange-500/15 text-orange-400 border-orange-500/30'
+                          : 'bg-blue-500/15 text-blue-400 border-blue-500/30'
+                      }`}>
+                        {a.llm_provider}
+                      </span>
+                    )}
                   </div>
                   <div className="flex flex-wrap gap-1 mb-2">
                     {a.competitors_analyzed.slice(0, 2).map(name => (

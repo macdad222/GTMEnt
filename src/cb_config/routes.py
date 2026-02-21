@@ -1,7 +1,7 @@
 """API routes for Comcast Business configuration management."""
 
 from typing import List, Optional
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from datetime import datetime
 
@@ -727,7 +727,6 @@ async def delete_segment_intel(tier: str):
 async def generate_segment_intel(
     tier: str, 
     force: bool = False,
-    background_tasks: BackgroundTasks = None
 ):
     """
     Generate market intelligence for a specific segment using LLM (async).
@@ -749,7 +748,8 @@ async def generate_segment_intel(
     queue.start_job(job.id)
     
     # Run in background
-    background_tasks.add_task(_run_segment_intel_generation, job.id, tier, force)
+    from src.tasks.segment_tasks import generate_segment_intel as seg_task
+    seg_task.delay(job.id, tier, force)
     
     return {
         "status": "started",
@@ -762,7 +762,6 @@ async def generate_segment_intel(
 @router.post("/cb-config/intel/generate-all")
 async def generate_all_segment_intel(
     force: bool = False,
-    background_tasks: BackgroundTasks = None
 ):
     """
     Generate market intelligence for all segments using LLM (async).
@@ -782,7 +781,8 @@ async def generate_all_segment_intel(
     queue.start_job(job.id)
     
     # Run in background
-    background_tasks.add_task(_run_all_segments_intel_generation, job.id, force)
+    from src.tasks.segment_tasks import generate_all_segments_intel as all_seg_task
+    all_seg_task.delay(job.id, force)
     
     return {
         "status": "started",

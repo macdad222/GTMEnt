@@ -17,6 +17,8 @@ import { QuestionsInsights } from './pages/QuestionsInsights'
 import { StrategyReport } from './pages/StrategyReport'
 import { Documentation } from './pages/Documentation'
 import { Login } from './pages/Login'
+import { GatePage } from './pages/GatePage'
+import { Register } from './pages/Register'
 import { CBConfigProvider } from './context/CBConfigContext'
 import { AuthProvider } from './context/AuthContext'
 import { VoiceAgentProvider } from './context/VoiceAgentContext'
@@ -28,8 +30,10 @@ export default function App() {
       <CBConfigProvider>
         <VoiceAgentProvider>
         <Routes>
-          {/* Public route - Login */}
+          {/* Public routes */}
+          <Route path="/gate" element={<GatePage />} />
           <Route path="/login" element={<Login />} />
+          <Route path="/register" element={<Register />} />
           
           {/* Protected routes */}
           <Route

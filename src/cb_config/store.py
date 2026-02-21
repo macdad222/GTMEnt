@@ -1,4 +1,4 @@
-"""Persistent store for Comcast Business configuration data."""
+"""Persistent store for Comcast Business configuration data, backed by PostgreSQL."""
 
 import json
 import os
@@ -18,12 +18,15 @@ from .models import (
     RepTypeQuota,
     MSASalesOverride,
 )
+from src.db_utils import db_load, db_save
 
 
 class CBConfigStore:
-    """Store for CB configuration with file persistence."""
+    """Store for CB configuration backed by PostgreSQL."""
     
     _instance: Optional["CBConfigStore"] = None
+    DB_KEY_CONFIG = "cb_config"
+    DB_KEY_INTEL = "segment_intel"
     
     def __new__(cls):
         if cls._instance is None:
@@ -36,11 +39,6 @@ class CBConfigStore:
             return
         
         self._initialized = True
-        self._data_dir = Path(os.environ.get("DATA_DIR", "./data"))
-        self._config_file = self._data_dir / "cb_config.json"
-        self._intel_file = self._data_dir / "segment_intel.json"
-        
-        self._data_dir.mkdir(parents=True, exist_ok=True)
         
         self._config: CBConfiguration = self._load_config()
         self._segment_intel: dict[str, SegmentMarketIntel] = self._load_intel()
@@ -668,7 +666,7 @@ class CBConfigStore:
         )
     
     def _load_config(self) -> CBConfiguration:
-        """Load configuration from file, merging with defaults for any new fields.
+        """Load configuration from database, merging with defaults for any new fields.
         
         This ensures that:
         1. User-entered data is always preserved
@@ -677,10 +675,9 @@ class CBConfigStore:
         """
         defaults = self._build_default_config()
         
-        if self._config_file.exists():
+        saved_data = db_load(self.DB_KEY_CONFIG)
+        if saved_data:
             try:
-                with open(self._config_file, "r") as f:
-                    saved_data = json.load(f)
                 
                 # Get default data as dict for merging
                 default_data = defaults.model_dump(mode="json")
@@ -744,30 +741,27 @@ class CBConfigStore:
         return result
     
     def _save_config(self) -> None:
-        """Save configuration to file."""
+        """Save configuration to database."""
         try:
-            with open(self._config_file, "w") as f:
-                json.dump(self._config.model_dump(mode="json"), f, indent=2, default=str)
+            db_save(self.DB_KEY_CONFIG, self._config.model_dump(mode="json"))
         except Exception as e:
             print(f"Error saving CB config: {e}")
     
     def _load_intel(self) -> dict[str, SegmentMarketIntel]:
-        """Load segment intel from file."""
-        if self._intel_file.exists():
+        """Load segment intel from database."""
+        data = db_load(self.DB_KEY_INTEL)
+        if data:
             try:
-                with open(self._intel_file, "r") as f:
-                    data = json.load(f)
                 return {k: SegmentMarketIntel(**v) for k, v in data.items()}
             except Exception as e:
                 print(f"Error loading segment intel: {e}")
         return {}
     
     def _save_intel(self) -> None:
-        """Save segment intel to file."""
+        """Save segment intel to database."""
         try:
-            with open(self._intel_file, "w") as f:
-                data = {k: v.model_dump(mode="json") for k, v in self._segment_intel.items()}
-                json.dump(data, f, indent=2, default=str)
+            data = {k: v.model_dump(mode="json") for k, v in self._segment_intel.items()}
+            db_save(self.DB_KEY_INTEL, data)
         except Exception as e:
             print(f"Error saving segment intel: {e}")
     

@@ -32,6 +32,7 @@ class JobType(str, Enum):
     SEGMENT_INTEL = "segment_intel"       # Segment market intelligence
     MSA_INTEL = "msa_intel"               # MSA market intelligence
     PRODUCT_ROADMAP = "product_roadmap"   # Product roadmap analysis
+    COMPETITIVE_SCRAPE = "competitive_scrape"  # Competitor website scraping
 
 
 class Job(BaseModel):

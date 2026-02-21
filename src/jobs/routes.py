@@ -1,7 +1,9 @@
 """API routes for job management and status tracking."""
 
+import asyncio
+import json
 from typing import List, Optional
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from datetime import datetime
 
@@ -169,14 +171,15 @@ async def get_job(job_id: str):
 
 
 @router.post("/import", response_model=List[JobResponse])
-async def import_data_sources(request: ImportRequest, background_tasks: BackgroundTasks):
+async def import_data_sources(request: ImportRequest):
     """
     Import data from public sources.
     
     Returns immediately with job IDs. Use /jobs/{id} to check status.
     """
+    from src.tasks.market_tasks import import_data_source
+    
     registry = get_public_data_registry()
-    fetcher = get_data_fetcher()
     queue = get_job_queue()
     
     jobs_created = []
@@ -200,39 +203,32 @@ async def import_data_sources(request: ImportRequest, background_tasks: Backgrou
         raise HTTPException(status_code=400, detail="Specify source_ids, category, or import_all")
     
     for source in sources:
-        # Create job
         job = queue.create_job(
             job_type=JobType.DATA_IMPORT,
             target_id=source.id,
             target_name=source.name,
         )
         jobs_created.append(job)
-        
-        # Schedule background task
-        background_tasks.add_task(
-            _run_import_job,
-            source.id,
-            source.name,
-            source.api_endpoint,
-        )
+        import_data_source.delay(source.id, source.name, source.api_endpoint)
     
     return [_job_to_response(j) for j in jobs_created]
 
 
 @router.post("/summarize", response_model=List[JobResponse])
-async def summarize_data_sources(request: SummarizeRequest, background_tasks: BackgroundTasks):
+async def summarize_data_sources(request: SummarizeRequest):
     """
     Generate LLM summaries for imported data.
     
     Returns immediately with job IDs. Use /jobs/{id} to check status.
     """
+    from src.tasks.market_tasks import summarize_data_source
+    
     registry = get_public_data_registry()
     queue = get_job_queue()
     
     jobs_created = []
     
     if request.summarize_all_imported:
-        # Get all sources with cached data from the registry
         sources_with_data = [s for s in registry.get_all_sources() if s.cached_data]
     elif request.source_ids:
         sources_with_data = []
@@ -244,22 +240,13 @@ async def summarize_data_sources(request: SummarizeRequest, background_tasks: Ba
         raise HTTPException(status_code=400, detail="Specify source_ids or summarize_all_imported")
     
     for source in sources_with_data:
-        # Create job
         job = queue.create_job(
             job_type=JobType.DATA_SUMMARY,
             target_id=source.id,
             target_name=f"Summary: {source.name}",
         )
         jobs_created.append(job)
-        
-        # Schedule background task with job_id
-        background_tasks.add_task(
-            _run_summary_job,
-            job.id,
-            source.id,
-            source.name,
-            source.cached_data,
-        )
+        summarize_data_source.delay(job.id, source.id, source.name, source.cached_data)
     
     return [_job_to_response(j) for j in jobs_created]
 
@@ -345,4 +332,42 @@ async def fix_stale_pending_jobs(older_than_hours: int = 24):
         "fixed_jobs": fixed_jobs,
         "message": f"Fixed {fixed_count} stale pending jobs that had existing data."
     }
+
+
+@router.websocket("/ws/{job_id}")
+async def job_status_ws(websocket: WebSocket, job_id: str):
+    """WebSocket endpoint for real-time job status updates.
+    
+    Sends job status every 2 seconds until job completes or fails.
+    """
+    await websocket.accept()
+    queue = get_job_queue()
+
+    try:
+        while True:
+            job = queue.get_job(job_id)
+            if not job:
+                await websocket.send_json({"error": "Job not found", "job_id": job_id})
+                break
+
+            await websocket.send_json({
+                "id": job.id,
+                "status": job.status.value if hasattr(job.status, 'value') else job.status,
+                "progress_pct": job.progress_pct,
+                "progress_message": job.progress_message,
+                "error": job.error,
+                "result": job.result,
+            })
+
+            if job.status in (JobStatus.COMPLETED, JobStatus.FAILED):
+                break
+
+            await asyncio.sleep(2)
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        try:
+            await websocket.close()
+        except Exception:
+            pass
 

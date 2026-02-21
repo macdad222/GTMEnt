@@ -39,9 +39,9 @@ class StrategyReportService:
             return
         self._initialized = True
         
-        self._data_dir = Path(os.environ.get("DATA_DIR", "./data"))
-        self._reports_file = self._data_dir / "strategy_reports.json"
-        self._data_dir.mkdir(parents=True, exist_ok=True)
+        from src.db_utils import db_load, db_save
+        self._db_load = db_load
+        self._db_save = db_save
         
         self._reports: Dict[str, StrategyReport] = self._load_reports()
         
@@ -54,24 +54,22 @@ class StrategyReportService:
         self.msa_research_service = get_msa_research_service()
     
     def _load_reports(self) -> Dict[str, StrategyReport]:
-        """Load reports from persistent storage."""
-        if self._reports_file.exists():
+        """Load reports from database."""
+        data = self._db_load("strategy_reports")
+        if data:
             try:
-                with open(self._reports_file, "r") as f:
-                    data = json.load(f)
                 return {k: StrategyReport(**v) for k, v in data.items()}
             except Exception as e:
                 print(f"Error loading strategy reports: {e}")
         return {}
     
     def _save_reports(self) -> None:
-        """Save reports to persistent storage."""
+        """Save reports to database."""
         try:
-            with open(self._reports_file, "w") as f:
-                json.dump(
-                    {k: v.model_dump(mode="json") for k, v in self._reports.items()},
-                    f, indent=2, default=str
-                )
+            self._db_save(
+                "strategy_reports",
+                {k: v.model_dump(mode="json") for k, v in self._reports.items()}
+            )
         except Exception as e:
             print(f"Error saving strategy reports: {e}")
     
@@ -131,12 +129,15 @@ class StrategyReportService:
                 context_data, llm_config
             )
             
+            # Save raw LLM response before parsing
+            report.raw_llm_response = report_content
+            
             # Parse and structure the response
             self._parse_llm_response(report, report_content)
             
             report.status = ReportStatus.COMPLETED
             report.llm_provider = llm_config.provider.value
-            report.llm_model = llm_config.model_name
+            report.llm_model = llm_config.get_default_model()
             report.data_sources_used = list(context_data.keys())
             
         except Exception as e:
@@ -170,11 +171,10 @@ class StrategyReportService:
             print(f"Error gathering CB config: {e}")
             data["company_metrics"] = {}
         
-        # 2. Competitive Intelligence - GET ALL COMPETITORS AND ANALYSES
+        # 2. Competitor List (raw data only, no LLM-generated analyses)
         try:
             competitors = self.competitive_service.get_competitors(active_only=True)
             data["competitors"] = []
-            # Include ALL competitors, not just top 15
             for comp in competitors:
                 comp_data = {
                     "name": comp.name,
@@ -186,27 +186,9 @@ class StrategyReportService:
                     "weaknesses": getattr(comp, 'weaknesses', []),
                 }
                 data["competitors"].append(comp_data)
-            
-            # Get ALL competitive analyses
-            analyses = self.competitive_service.get_analyses(limit=50)  # Get all analyses
-            if analyses:
-                data["competitive_analyses"] = []
-                for analysis in analyses:
-                    data["competitive_analyses"].append({
-                        "competitor_ids": getattr(analysis, 'competitor_ids', []),
-                        "executive_summary": analysis.executive_summary,
-                        "strengths_weaknesses": analysis.strengths_weaknesses,
-                        "market_positioning": analysis.market_positioning,
-                        "product_comparison": getattr(analysis, 'product_comparison', ''),
-                        "recommendations": analysis.recommendations if analysis.recommendations else [],
-                        "opportunities": analysis.opportunities if analysis.opportunities else [],
-                        "threats": analysis.threats if analysis.threats else [],
-                        "key_differentiators": getattr(analysis, 'key_differentiators', []),
-                    })
         except Exception as e:
             print(f"Error gathering competitive intel: {e}")
             data["competitors"] = []
-            data["competitive_analyses"] = []
         
         # 3. Market Intelligence
         try:
@@ -219,11 +201,10 @@ class StrategyReportService:
             print(f"Error gathering market intel: {e}")
             data["market_intelligence"] = {}
         
-        # 4. MSA Geographic Data - GET ALL MSAs WITH FULL INTEL
+        # 4. MSA Geographic Data (raw metrics only, no LLM-generated intel)
         try:
             msas = self.msa_registry.get_all()
             data["msa_markets"] = []
-            # Sort by priority_score descending - include ALL MSAs
             sorted_msas = sorted(msas, key=lambda m: m.priority_score, reverse=True)
             for msa in sorted_msas:
                 msa_data = {
@@ -246,21 +227,6 @@ class StrategyReportService:
                     "market_share_pct": getattr(msa, 'market_share_pct', 0),
                     "total_accounts": getattr(msa, 'total_accounts', 0),
                 }
-                # Get FULL market intel if available
-                intel = self.msa_research_service.get_cached_intel(msa.code)
-                if intel:
-                    msa_data["market_intel"] = {
-                        "executive_summary": getattr(intel, 'executive_summary', ''),
-                        "market_overview": intel.market_overview,
-                        "market_dynamics": getattr(intel, 'market_dynamics', ''),
-                        "competitive_landscape": intel.competitive_landscape,
-                        "key_competitors": getattr(intel, 'key_competitors', []),
-                        "product_opportunities": [p.model_dump(mode="json") for p in intel.product_opportunities],
-                        "sales_recommendations": [s.model_dump(mode="json") for s in intel.sales_recommendations],
-                        "segment_opportunities": getattr(intel, 'segment_opportunities', {}),
-                        "key_insights": getattr(intel, 'key_insights', []),
-                        "strategic_priorities": getattr(intel, 'strategic_priorities', []),
-                    }
                 data["msa_markets"].append(msa_data)
         except Exception as e:
             print(f"Error gathering MSA data: {e}")
@@ -292,34 +258,7 @@ class StrategyReportService:
             print(f"Error gathering segment summaries: {e}")
             data["segment_summaries"] = []
         
-        # 6. Segment Market Intelligence (LLM-generated insights per segment)
-        try:
-            segment_intel = []
-            for segment in data.get("segment_summaries", []):
-                tier = segment.get("tier")
-                # Try to get cached segment intel from cb_config_store
-                cached_intel = self.cb_config_store.get_segment_intel(tier) if hasattr(self.cb_config_store, 'get_segment_intel') else None
-                if cached_intel:
-                    segment_intel.append({
-                        "tier": tier,
-                        "label": segment.get("label"),
-                        "executive_summary": getattr(cached_intel, 'executive_summary', ''),
-                        "tam_estimate": getattr(cached_intel, 'tam_estimate', 0),
-                        "sam_estimate": getattr(cached_intel, 'sam_estimate', 0),
-                        "total_market_customers": getattr(cached_intel, 'total_market_customers', 0),
-                        "total_market_revenue": getattr(cached_intel, 'total_market_revenue', 0),
-                        "growth_strategies": [s.model_dump(mode="json") if hasattr(s, 'model_dump') else s for s in getattr(cached_intel, 'growth_strategies', [])],
-                        "buyer_personas": [p.model_dump(mode="json") if hasattr(p, 'model_dump') else p for p in getattr(cached_intel, 'buyer_personas', [])],
-                        "competitive_landscape": getattr(cached_intel, 'competitive_landscape', ''),
-                        "pricing_insights": getattr(cached_intel, 'pricing_insights', ''),
-                        "key_takeaways": getattr(cached_intel, 'key_takeaways', []),
-                    })
-            data["segment_intel"] = segment_intel
-        except Exception as e:
-            print(f"Error gathering segment intel: {e}")
-            data["segment_intel"] = []
-        
-        # 7. Product Portfolio Details (with full analysis)
+        # 6. Product Portfolio Details
         try:
             product_details = []
             for product in data.get("products", []):
@@ -355,7 +294,7 @@ class StrategyReportService:
         user_prompt = self._build_user_prompt(context_data)
         
         provider = llm_config.provider
-        model = llm_config.model_name
+        model = llm_config.get_default_model()
         api_key = llm_config.api_key
         
         async with httpx.AsyncClient(timeout=600.0) as client:
@@ -373,7 +312,7 @@ class StrategyReportService:
                             {"role": "user", "content": user_prompt},
                         ],
                         "temperature": 0.7,
-                        "max_tokens": 16000,
+                        "max_tokens": 25000,
                     },
                 )
                 response.raise_for_status()
@@ -393,7 +332,7 @@ class StrategyReportService:
                             {"role": "user", "content": user_prompt},
                         ],
                         "temperature": 0.7,
-                        "max_tokens": 16000,
+                        "max_tokens": 25000,
                     },
                 )
                 response.raise_for_status()
@@ -409,12 +348,16 @@ class StrategyReportService:
                     },
                     json={
                         "model": model,
-                        "max_tokens": 16000,
+                        "max_tokens": 25000,
+                        "system": system_prompt,
                         "messages": [
-                            {"role": "user", "content": system_prompt + "\n\n" + user_prompt}
+                            {"role": "user", "content": user_prompt}
                         ],
                     },
                 )
+                if response.status_code != 200:
+                    error_body = response.text
+                    print(f"Anthropic API error {response.status_code}: {error_body}")
                 response.raise_for_status()
                 return response.json()["content"][0]["text"]
             
@@ -624,11 +567,25 @@ THIS IS YOUR MASTERPIECE. Make it worthy of a $10 million consulting engagement.
         
         return "\n".join(prompt_parts)
     
+    def _detect_main_header_level(self, content: str) -> str:
+        """Detect whether the LLM used # or ## for main section headers."""
+        import re
+        known_sections = ["EXECUTIVE SUMMARY", "KEY INSIGHTS", "STRATEGIC RECOMMENDATIONS",
+                          "MARKET OVERVIEW", "COMPETITIVE LANDSCAPE", "CUSTOMER SEGMENTATION"]
+        for section in known_sections:
+            if re.search(rf'^#\s+{section}', content, re.MULTILINE | re.IGNORECASE):
+                return '#'
+            if re.search(rf'^##\s+{section}', content, re.MULTILINE | re.IGNORECASE):
+                return '##'
+        return '##'
+
     def _parse_llm_response(self, report: StrategyReport, content: str) -> None:
         """Parse LLM response and populate report structure."""
+        import re
         
-        # Store the full response as executive summary initially
-        # We'll extract sections from markdown
+        main_level = self._detect_main_header_level(content)
+        level_len = len(main_level)
+        main_header_re = re.compile(rf'^{re.escape(main_level)}\s+(.+)$', re.MULTILINE)
         
         sections_map = {
             "EXECUTIVE SUMMARY": ReportSection.EXECUTIVE_SUMMARY,
@@ -647,120 +604,133 @@ THIS IS YOUR MASTERPIECE. Make it worthy of a $10 million consulting engagement.
             "APPENDIX": ReportSection.APPENDIX,
         }
         
-        # Extract executive summary (first major section)
-        if "## EXECUTIVE SUMMARY" in content:
-            start = content.find("## EXECUTIVE SUMMARY")
-            end = content.find("\n## ", start + 1)
-            if end == -1:
-                end = len(content)
-            report.executive_summary = content[start:end].replace("## EXECUTIVE SUMMARY", "").strip()
-        else:
-            # Use first 2000 chars as summary
-            report.executive_summary = content[:2000]
+        headers = list(main_header_re.finditer(content))
         
-        # Parse sections
+        report.executive_summary = ""
         report.sections = []
         
-        lines = content.split("\n")
-        current_section = None
-        current_content = []
-        
-        for line in lines:
-            if line.startswith("## "):
-                # Save previous section
-                if current_section and current_content:
-                    section_text = "\n".join(current_content).strip()
-                    # Find matching section type
-                    section_type = None
-                    for key, sect in sections_map.items():
-                        if key in current_section.upper():
-                            section_type = sect
-                            break
-                    
-                    if section_type:
-                        report.sections.append(ReportSectionContent(
-                            section_id=section_type,
-                            section_title=current_section.replace("## ", ""),
-                            narrative=section_text,
-                        ))
-                
-                current_section = line
-                current_content = []
-            else:
-                current_content.append(line)
-        
-        # Don't forget the last section
-        if current_section and current_content:
-            section_text = "\n".join(current_content).strip()
+        for idx, hdr in enumerate(headers):
+            title = hdr.group(1).strip()
+            section_start = hdr.end()
+            section_end = headers[idx + 1].start() if idx + 1 < len(headers) else len(content)
+            section_text = content[section_start:section_end].strip()
+            
+            title_upper = title.upper()
+            
+            if "EXECUTIVE SUMMARY" in title_upper:
+                report.executive_summary = section_text
+                continue
+            
+            if "KEY INSIGHTS" in title_upper or "STRATEGIC RECOMMENDATIONS" in title_upper:
+                continue
+            
             section_type = None
             for key, sect in sections_map.items():
-                if key in current_section.upper():
+                if key in title_upper:
                     section_type = sect
                     break
             
             if section_type:
                 report.sections.append(ReportSectionContent(
                     section_id=section_type,
-                    section_title=current_section.replace("## ", ""),
+                    section_title=title,
                     narrative=section_text,
                 ))
         
-        # Extract key insights if present
-        self._extract_key_insights(report, content)
+        if not report.executive_summary:
+            report.executive_summary = content[:2000]
         
-        # Extract strategic recommendations if present
-        self._extract_recommendations(report, content)
+        self._extract_key_insights(report, content, main_level)
+        self._extract_recommendations(report, content, main_level)
     
-    def _extract_key_insights(self, report: StrategyReport, content: str) -> None:
+    def _extract_key_insights(self, report: StrategyReport, content: str, main_level: str = '##') -> None:
         """Extract key insights from content."""
-        if "## KEY INSIGHTS" in content:
-            start = content.find("## KEY INSIGHTS")
-            end = content.find("\n## ", start + 1)
-            if end == -1:
-                end = start + 3000
-            
-            insights_text = content[start:end]
-            
-            # Parse numbered insights
-            import re
-            insight_pattern = r'\d+\.\s*\*\*([^*]+)\*\*[:\s]*([^\n]+(?:\n(?!\d+\.).*)*)'
-            matches = re.findall(insight_pattern, insights_text)
-            
-            for i, (title, desc) in enumerate(matches[:5]):
+        import re
+        
+        level_re = re.escape(main_level)
+        match = re.search(rf'^{level_re}\s+KEY INSIGHTS', content, re.MULTILINE | re.IGNORECASE)
+        if not match:
+            match = re.search(r'^#{1,3}\s+KEY INSIGHTS', content, re.MULTILINE | re.IGNORECASE)
+        if not match:
+            return
+        
+        start = match.end()
+        end_match = re.search(rf'\n{level_re}\s+(?!.*insight)', content[start:], re.IGNORECASE)
+        end = start + end_match.start() if end_match else len(content)
+        insights_text = content[start:end]
+        
+        sub_header_pattern = r'#{1,4}\s+(?:Insight\s+)?\d+[:.]\s*(.+?)(?:\n)([\s\S]*?)(?=\n#{1,4}\s+(?:Insight\s+)?\d+[:.]\s|\Z)'
+        sub_matches = re.findall(sub_header_pattern, insights_text, re.IGNORECASE)
+        
+        if not sub_matches:
+            bold_pattern = r'\d+\.\s*\*\*([^*]+)\*\*[:\s]*([^\n]+(?:\n(?!\d+\.).*)*)'
+            sub_matches = re.findall(bold_pattern, insights_text)
+        
+        report.key_insights = []
+        for i, (title, desc) in enumerate(sub_matches[:10]):
+            title_clean = re.sub(r'^[:\-—\s]+', '', title).strip()
+            desc_clean = desc.strip()
+            if title_clean:
                 report.key_insights.append(KeyInsight(
-                    title=title.strip(),
-                    description=desc.strip(),
+                    title=title_clean,
+                    description=desc_clean[:2000] if desc_clean else title_clean,
                     impact="high" if i < 2 else "medium",
                     category="strategic"
                 ))
     
-    def _extract_recommendations(self, report: StrategyReport, content: str) -> None:
+    def _extract_recommendations(self, report: StrategyReport, content: str, main_level: str = '##') -> None:
         """Extract strategic recommendations from content."""
-        if "## STRATEGIC RECOMMENDATIONS" in content:
-            start = content.find("## STRATEGIC RECOMMENDATIONS")
-            end = content.find("\n## ", start + 1)
-            if end == -1:
-                end = start + 3000
-            
-            recs_text = content[start:end]
-            
-            # Parse numbered recommendations
-            import re
-            rec_pattern = r'\d+\.\s*\*\*([^*]+)\*\*[:\s]*([^\n]+(?:\n(?!\d+\.).*)*)'
-            matches = re.findall(rec_pattern, recs_text)
-            
-            timelines = ["immediate", "short-term", "medium-term", "long-term", "long-term"]
-            
-            for i, (title, desc) in enumerate(matches[:5]):
+        import re
+        
+        level_re = re.escape(main_level)
+        match = re.search(rf'^{level_re}\s+STRATEGIC RECOMMENDATIONS', content, re.MULTILINE | re.IGNORECASE)
+        if not match:
+            match = re.search(r'^#{1,3}\s+STRATEGIC RECOMMENDATIONS', content, re.MULTILINE | re.IGNORECASE)
+        if not match:
+            return
+        
+        start = match.end()
+        end_match = re.search(rf'\n{level_re}\s+(?!.*recommendation)', content[start:], re.IGNORECASE)
+        end = start + end_match.start() if end_match else len(content)
+        recs_text = content[start:end]
+        
+        sub_header_pattern = r'#{1,4}\s+(?:Recommendation\s+)?\d+[:.]\s*(.+?)(?:\n)([\s\S]*?)(?=\n#{1,4}\s+(?:Recommendation\s+)?\d+[:.]\s|\Z)'
+        sub_matches = re.findall(sub_header_pattern, recs_text, re.IGNORECASE)
+        
+        if not sub_matches:
+            bold_pattern = r'\d+\.\s*\*\*([^*]+)\*\*[:\s]*([^\n]+(?:\n(?!\d+\.).*)*)'
+            sub_matches = re.findall(bold_pattern, recs_text)
+        
+        timelines = ["immediate", "short-term", "medium-term", "long-term", "long-term"]
+        
+        report.strategic_recommendations = []
+        for i, (title, desc) in enumerate(sub_matches[:10]):
+            title_clean = re.sub(r'^[:\-—\s]+', '', title).strip()
+            desc_clean = desc.strip()
+            if title_clean:
                 report.strategic_recommendations.append(StrategicRecommendation(
                     priority=i + 1,
-                    title=title.strip(),
-                    description=desc.strip(),
+                    title=title_clean,
+                    description=desc_clean[:2000] if desc_clean else title_clean,
                     rationale="Based on comprehensive analysis",
                     expected_impact="High" if i < 2 else "Medium",
                     timeline=timelines[i] if i < len(timelines) else "medium-term"
                 ))
     
+    def reparse_report(self, report: StrategyReport) -> StrategyReport:
+        """Re-parse a report from its stored raw_llm_response."""
+        if not report.raw_llm_response:
+            return report
+        
+        report.key_insights = []
+        report.strategic_recommendations = []
+        report.sections = []
+        report.executive_summary = ""
+        
+        self._parse_llm_response(report, report.raw_llm_response)
+        self._save_reports()
+        return report
+
     def delete_report(self, report_id: str) -> bool:
         """Delete a report."""
         if report_id in self._reports:

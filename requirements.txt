@@ -2,11 +2,15 @@
 # Core web framework
 fastapi>=0.109.0
 uvicorn[standard]>=0.27.0
+gunicorn>=21.1.0
 
 # Database / ORM
 sqlalchemy>=2.0.25
 alembic>=1.13.1
-asyncpg>=0.29.0
+psycopg2-binary>=2.9.9
+
+# Task queue
+celery[redis]>=5.3.6
 
 # Data processing
 pandas>=2.2.0
@@ -34,11 +38,15 @@ websockets>=12.0
 # Auth / security
 python-jose[cryptography]>=3.3.0
 passlib[bcrypt]>=1.7.4
+bcrypt==4.0.1
 
 # Config / env
 pydantic>=2.6.0
 pydantic-settings>=2.1.0
 python-dotenv>=1.0.1
+
+# Rate limiting
+slowapi>=0.1.9
 
 # Utilities
 rich>=13.7.0
@@ -53,4 +61,3 @@ lxml>=5.1.0
 pytest>=8.0.0
 pytest-asyncio>=0.23.4
 pytest-cov>=4.1.0
-

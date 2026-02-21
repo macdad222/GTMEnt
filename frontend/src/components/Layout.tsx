@@ -219,7 +219,7 @@ export function Layout() {
                   <Menu.Items className="absolute right-0 mt-2 w-56 origin-top-right rounded-xl bg-slate-800 border border-white/10 shadow-xl shadow-black/25 focus:outline-none overflow-hidden">
                     <div className="px-4 py-3 border-b border-white/10">
                       <p className="text-sm font-medium text-white">{user?.name}</p>
-                      <p className="text-xs text-slate-400">@{user?.username}</p>
+                      <p className="text-xs text-slate-400">{user?.email}</p>
                     </div>
                     <div className="py-1">
                       <Menu.Item>

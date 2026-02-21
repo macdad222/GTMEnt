@@ -620,7 +620,7 @@ export function StrategyReport() {
     reset: resetJobPolling,
   } = useJobPolling({
     interval: 2000,
-    timeout: 300000, // 5 minutes
+    timeout: 600000, // 10 minutes
     onComplete: async () => {
       // Fetch the completed report
       await fetchLatestReport()

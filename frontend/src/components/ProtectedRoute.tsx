@@ -6,10 +6,9 @@ interface ProtectedRouteProps {
 }
 
 export function ProtectedRoute({ children }: ProtectedRouteProps) {
-  const { isAuthenticated, isLoading, user } = useAuth();
+  const { isAuthenticated, isLoading } = useAuth();
   const location = useLocation();
 
-  // Show loading state while checking authentication
   if (isLoading) {
     return (
       <div className="min-h-screen bg-slate-950 flex items-center justify-center">
@@ -21,16 +20,9 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
     );
   }
 
-  // Redirect to login if not authenticated
   if (!isAuthenticated) {
-    return <Navigate to="/login" state={{ from: location }} replace />;
-  }
-
-  // If user needs to change password, redirect to login (which handles password change)
-  if (user?.requiresPasswordChange) {
-    return <Navigate to="/login" state={{ from: location }} replace />;
+    return <Navigate to="/gate" state={{ from: location }} replace />;
   }
 
   return <>{children}</>;
 }
-

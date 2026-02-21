@@ -38,7 +38,7 @@ class SegmentResearchService:
             
             model = provider_config.get_default_model()
             
-            with httpx.Client(timeout=300.0) as client:
+            with httpx.Client(timeout=600.0) as client:
                 response = client.post(
                     "https://api.x.ai/v1/chat/completions",
                     headers={
@@ -51,7 +51,7 @@ class SegmentResearchService:
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": prompt},
                         ],
-                        "max_tokens": 8000,
+                        "max_tokens": 25000,
                         "temperature": 0.7,
                     },
                 )
@@ -64,7 +64,7 @@ class SegmentResearchService:
             
             model = provider_config.get_default_model()
             
-            with httpx.Client(timeout=300.0) as client:
+            with httpx.Client(timeout=600.0) as client:
                 response = client.post(
                     "https://api.openai.com/v1/chat/completions",
                     headers={
@@ -77,7 +77,7 @@ class SegmentResearchService:
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": prompt},
                         ],
-                        "max_tokens": 8000,
+                        "max_tokens": 25000,
                         "temperature": 0.7,
                     },
                 )
@@ -90,7 +90,7 @@ class SegmentResearchService:
             
             model = provider_config.get_default_model()
             
-            with httpx.Client(timeout=300.0) as client:
+            with httpx.Client(timeout=600.0) as client:
                 response = client.post(
                     "https://api.anthropic.com/v1/messages",
                     headers={
@@ -100,16 +100,23 @@ class SegmentResearchService:
                     },
                     json={
                         "model": model,
-                        "max_tokens": 8000,
+                        "max_tokens": 25000,
                         "system": system_prompt,
                         "messages": [
                             {"role": "user", "content": prompt},
                         ],
                     },
                 )
+                if response.status_code != 200:
+                    print(f"Anthropic API error {response.status_code}: {response.text[:500]}")
                 response.raise_for_status()
                 data = response.json()
-                return data["content"][0]["text"], provider_name, model
+                stop_reason = data.get("stop_reason", "unknown")
+                content_text = data["content"][0]["text"]
+                print(f"Anthropic segment research response: {len(content_text)} chars, stop_reason={stop_reason}")
+                if stop_reason == "max_tokens":
+                    print("WARNING: Segment research response was truncated due to max_tokens limit")
+                return content_text, provider_name, model
         
         raise ValueError(f"Unsupported LLM provider: {provider_name}")
     

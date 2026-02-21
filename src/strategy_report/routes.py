@@ -1,6 +1,6 @@
 """API routes for strategy reports."""
 
-from fastapi import APIRouter, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, HTTPException, status, Request
 from typing import List, Optional
 from pydantic import BaseModel
 
@@ -99,7 +99,6 @@ async def get_report(report_id: str):
 
 @router.post("/generate", status_code=status.HTTP_202_ACCEPTED)
 async def generate_report(
-    background_tasks: BackgroundTasks,
     request: Optional[GenerateReportRequest] = None
 ):
     """
@@ -109,11 +108,10 @@ async def generate_report(
     When complete, use /strategy-report/latest to get the report.
     """
     import uuid
+    from src.tasks.strategy_tasks import generate_strategy_report
     
-    # Create a placeholder report ID
     report_id = str(uuid.uuid4())
     
-    # Create a job to track progress
     queue = get_job_queue()
     job = queue.create_job(
         job_type=JobType.STRATEGY_REPORT,
@@ -122,8 +120,7 @@ async def generate_report(
     )
     queue.start_job(job.id)
     
-    # Run generation in background
-    background_tasks.add_task(_run_report_generation, job.id, report_id)
+    generate_strategy_report.delay(job.id, report_id)
     
     return {
         "status": "started",
@@ -131,6 +128,44 @@ async def generate_report(
         "report_id": report_id,
         "message": "Strategy report generation started. This may take 2-3 minutes.",
     }
+
+
+@router.post("/latest/reparse")
+async def reparse_latest_report():
+    """Re-parse the latest report from its saved raw LLM response."""
+    report = strategy_service.get_latest_report()
+    if not report:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No reports found"
+        )
+    if not report.raw_llm_response:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Report has no saved raw LLM response to re-parse"
+        )
+    
+    strategy_service.reparse_report(report)
+    return {"status": "reparsed", "report_id": report.id}
+
+
+@router.post("/{report_id}/reparse")
+async def reparse_report(report_id: str):
+    """Re-parse a report from its saved raw LLM response without regenerating."""
+    report = strategy_service.get_report(report_id)
+    if not report:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Report '{report_id}' not found"
+        )
+    if not report.raw_llm_response:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Report has no saved raw LLM response to re-parse"
+        )
+    
+    strategy_service.reparse_report(report)
+    return {"status": "reparsed", "report_id": report.id}
 
 
 @router.delete("/{report_id}", status_code=status.HTTP_204_NO_CONTENT)

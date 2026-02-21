@@ -61,6 +61,6 @@ EXPOSE 3700
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:3700/api/admin/health || exit 1
 
-# Run the application
-CMD ["uvicorn", "src.api.app:app", "--host", "0.0.0.0", "--port", "3700"]
+# Run the application with gunicorn + uvicorn workers for multi-process scaling
+CMD ["gunicorn", "src.api.app:app", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:3700", "--timeout", "600"]
 

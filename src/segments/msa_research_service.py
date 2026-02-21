@@ -118,24 +118,21 @@ class MSAResearchService:
     
     def __init__(self):
         self._admin_store = AdminConfigStore()
-        self._data_dir = Path("/app/data")
-        self._intel_file = self._data_dir / "msa_intel.json"
-        self._data_dir.mkdir(parents=True, exist_ok=True)
+        from src.db_utils import db_load, db_save
+        self._db_load = db_load
+        self._db_save = db_save
         self._intel_cache: Dict[str, MSAMarketIntel] = self._load_cache()
     
     def _load_cache(self) -> Dict[str, MSAMarketIntel]:
-        """Load cached intel from file."""
-        if not self._intel_file.exists():
-            return {}
-        
+        """Load cached intel from database."""
         try:
-            with open(self._intel_file, "r") as f:
-                data = json.load(f)
+            data = self._db_load("msa_intel")
+            if not data:
+                return {}
             
             cache = {}
             for msa_code, intel_data in data.items():
                 try:
-                    # Convert datetime string back to datetime object
                     if isinstance(intel_data.get("generated_at"), str):
                         intel_data["generated_at"] = datetime.fromisoformat(intel_data["generated_at"].replace("Z", "+00:00"))
                     cache[msa_code] = MSAMarketIntel(**intel_data)
@@ -150,19 +147,16 @@ class MSAResearchService:
             return {}
     
     def _save_cache(self):
-        """Save intel cache to file."""
+        """Save intel cache to database."""
         try:
             data = {}
             for msa_code, intel in self._intel_cache.items():
                 intel_dict = intel.model_dump()
-                # Convert datetime to ISO string for JSON serialization
                 if isinstance(intel_dict.get("generated_at"), datetime):
                     intel_dict["generated_at"] = intel_dict["generated_at"].isoformat()
                 data[msa_code] = intel_dict
             
-            with open(self._intel_file, "w") as f:
-                json.dump(data, f, indent=2, default=str)
-            
+            self._db_save("msa_intel", data)
             print(f"Saved {len(data)} MSA intel entries to cache")
         except Exception as e:
             print(f"Error saving MSA intel cache: {e}")
@@ -190,7 +184,7 @@ class MSAResearchService:
             
             model = provider_config.get_default_model() or "grok-4-1-fast-reasoning"
             
-            with httpx.Client(timeout=300.0) as client:
+            with httpx.Client(timeout=600.0) as client:
                 response = client.post(
                     "https://api.x.ai/v1/chat/completions",
                     headers={
@@ -203,7 +197,7 @@ class MSAResearchService:
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": prompt},
                         ],
-                        "max_tokens": 10000,
+                        "max_tokens": 25000,
                         "temperature": 0.7,
                     },
                 )
@@ -216,7 +210,7 @@ class MSAResearchService:
             
             model = provider_config.get_default_model() or "gpt-4-turbo-preview"
             
-            with httpx.Client(timeout=300.0) as client:
+            with httpx.Client(timeout=600.0) as client:
                 response = client.post(
                     "https://api.openai.com/v1/chat/completions",
                     headers={
@@ -229,7 +223,7 @@ class MSAResearchService:
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": prompt},
                         ],
-                        "max_tokens": 10000,
+                        "max_tokens": 25000,
                         "temperature": 0.7,
                     },
                 )
@@ -240,9 +234,9 @@ class MSAResearchService:
         elif provider_config.provider == "anthropic":
             import httpx
             
-            model = provider_config.get_default_model() or "claude-3-opus-20240229"
+            model = provider_config.get_default_model()
             
-            with httpx.Client(timeout=300.0) as client:
+            with httpx.Client(timeout=600.0) as client:
                 response = client.post(
                     "https://api.anthropic.com/v1/messages",
                     headers={
@@ -252,7 +246,7 @@ class MSAResearchService:
                     },
                     json={
                         "model": model,
-                        "max_tokens": 10000,
+                        "max_tokens": 25000,
                         "system": system_prompt,
                         "messages": [
                             {"role": "user", "content": prompt},
@@ -260,12 +254,39 @@ class MSAResearchService:
                         "temperature": 0.7,
                     },
                 )
+                if response.status_code != 200:
+                    print(f"Anthropic API error {response.status_code}: {response.text[:500]}")
                 response.raise_for_status()
                 data = response.json()
-                return data["content"][0]["text"], provider_config.provider.value, model
+                content_text = data["content"][0]["text"]
+                stop_reason = data.get("stop_reason", "unknown")
+                print(f"Anthropic MSA response: {len(content_text)} chars, stop_reason={stop_reason}")
+                if stop_reason == "max_tokens":
+                    print("WARNING: Response was truncated due to max_tokens limit")
+                return content_text, provider_config.provider.value, model
         
         else:
             raise ValueError(f"Unsupported LLM provider: {provider_config.provider}")
+
+    def _extract_json(self, text: str) -> str:
+        """Extract JSON from LLM response, handling preamble text and code fences."""
+        fence_match = re.search(r"```(?:json)?\s*\n(.*?)```", text, re.DOTALL)
+        if fence_match:
+            return fence_match.group(1).strip()
+        
+        first_brace = text.find('{')
+        if first_brace != -1:
+            depth = 0
+            for i in range(first_brace, len(text)):
+                if text[i] == '{':
+                    depth += 1
+                elif text[i] == '}':
+                    depth -= 1
+                    if depth == 0:
+                        return text[first_brace:i + 1]
+            return text[first_brace:]
+        
+        return text
 
     def generate_msa_intel(
         self,
@@ -491,13 +512,7 @@ Ensure sales resource recommendations align with the market opportunity and Comc
         try:
             llm_response_content, llm_provider, llm_model = self._call_llm(user_prompt, system_prompt)
             
-            # Clean the response
-            cleaned_response = re.search(r"```json\n(.*)```", llm_response_content, re.DOTALL)
-            if cleaned_response:
-                json_content = cleaned_response.group(1)
-            else:
-                json_content = llm_response_content
-
+            json_content = self._extract_json(llm_response_content)
             data = json.loads(json_content)
             
             # Parse product opportunities
@@ -579,7 +594,9 @@ Ensure sales resource recommendations align with the market opportunity and Comc
         
         except json.JSONDecodeError as e:
             print(f"JSON Decode Error: {e}")
-            print(f"LLM Response: {llm_response_content}")
+            print(f"LLM Response (first 500 chars): {llm_response_content[:500]}")
+            print(f"LLM Response (last 500 chars): {llm_response_content[-500:]}")
+            print(f"Total response length: {len(llm_response_content)} chars")
             raise ValueError(f"Failed to parse LLM response as JSON: {e}")
         except Exception as e:
             print(f"Error generating MSA intel: {e}")

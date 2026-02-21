@@ -14,13 +14,14 @@ from .models import (
 )
 from .scraper import get_web_scraper
 from src.admin.store import admin_store
+from src.db_utils import db_load, db_save
 
 
 class CompetitiveIntelService:
     """Service for managing competitors and generating competitive analysis."""
     
-    DATA_FILE = "./data/competitors.json"
-    ANALYSIS_FILE = "./data/competitive_analyses.json"
+    DB_KEY_COMPETITORS = "competitors"
+    DB_KEY_ANALYSES = "competitive_analyses"
     
     # Comcast Business Enterprise URL
     COMCAST_BUSINESS_URL = "https://business.comcast.com/enterprise"
@@ -33,53 +34,45 @@ class CompetitiveIntelService:
         self._init_default_competitors()
     
     def _load_data(self):
-        """Load competitors and analyses from file."""
-        os.makedirs(os.path.dirname(self.DATA_FILE), exist_ok=True)
-        
-        if os.path.exists(self.DATA_FILE):
+        """Load competitors and analyses from database."""
+        data = db_load(self.DB_KEY_COMPETITORS)
+        if data:
             try:
-                with open(self.DATA_FILE, 'r') as f:
-                    data = json.load(f)
-                    for c_data in data.get('competitors', []):
-                        comp = Competitor(**c_data)
-                        self._competitors[comp.id] = comp
-                    if data.get('comcast_data'):
-                        self._comcast_data = ScrapedWebContent(**data['comcast_data'])
+                for c_data in data.get('competitors', []):
+                    comp = Competitor(**c_data)
+                    self._competitors[comp.id] = comp
+                if data.get('comcast_data'):
+                    self._comcast_data = ScrapedWebContent(**data['comcast_data'])
             except Exception as e:
                 print(f"Warning: Could not load competitors: {e}")
         
-        if os.path.exists(self.ANALYSIS_FILE):
+        analyses_data = db_load(self.DB_KEY_ANALYSES)
+        if analyses_data:
             try:
-                with open(self.ANALYSIS_FILE, 'r') as f:
-                    data = json.load(f)
-                    for a_data in data:
-                        analysis = CompetitiveAnalysis(**a_data)
-                        self._analyses[analysis.id] = analysis
+                for a_data in analyses_data:
+                    analysis = CompetitiveAnalysis(**a_data)
+                    self._analyses[analysis.id] = analysis
             except Exception as e:
                 print(f"Warning: Could not load analyses: {e}")
     
     def _save_data(self):
-        """Save competitors to file."""
+        """Save competitors to database."""
         try:
-            os.makedirs(os.path.dirname(self.DATA_FILE), exist_ok=True)
             data = {
                 'competitors': [c.model_dump(mode='json') for c in self._competitors.values()],
                 'comcast_data': self._comcast_data.model_dump(mode='json') if self._comcast_data else None,
             }
-            with open(self.DATA_FILE, 'w') as f:
-                json.dump(data, f, indent=2, default=str)
+            db_save(self.DB_KEY_COMPETITORS, data)
         except Exception as e:
             print(f"Warning: Could not save competitors: {e}")
     
     def _save_analyses(self):
-        """Save analyses to file."""
+        """Save analyses to database."""
         try:
-            os.makedirs(os.path.dirname(self.ANALYSIS_FILE), exist_ok=True)
-            with open(self.ANALYSIS_FILE, 'w') as f:
-                json.dump(
-                    [a.model_dump(mode='json') for a in self._analyses.values()],
-                    f, indent=2, default=str
-                )
+            db_save(
+                self.DB_KEY_ANALYSES,
+                [a.model_dump(mode='json') for a in self._analyses.values()]
+            )
         except Exception as e:
             print(f"Warning: Could not save analyses: {e}")
     
@@ -537,7 +530,7 @@ class CompetitiveIntelService:
         analysis_text = self._call_llm(
             llm_config.provider.value,
             llm_config.api_key,
-            llm_config.model_name,
+            llm_config.get_default_model(),
             prompt,
         )
         
@@ -552,7 +545,7 @@ class CompetitiveIntelService:
             competitor_ids=competitor_ids,
             competitor_data={k: v.model_dump() for k, v in competitor_data.items()},
             llm_provider=llm_config.provider.value,
-            llm_model=llm_config.model_name,
+            llm_model=llm_config.get_default_model(),
             executive_summary=self._extract_section(analysis_text, "Executive Summary"),
             strengths_weaknesses={
                 "strengths": self._extract_list(analysis_text, r"Competitive Strengths.*"),
@@ -647,7 +640,9 @@ You are preparing a competitive analysis for C-level executives at Comcast Busin
 ANALYSIS REQUEST
 ═══════════════════════════════════════════════════════════════════════════════
 
-Analyze Comcast Business Enterprise against these competitors: {', '.join(competitor_names)}.
+Analyze Comcast Business Enterprise against {'this competitor: ' + competitor_names[0] if len(competitor_names) == 1 else 'these competitors: ' + ', '.join(competitor_names)}.
+
+IMPORTANT: Focus your analysis EXCLUSIVELY on Comcast Business vs. {', '.join(competitor_names)}. Do NOT reference, compare against, or bring in any other companies or competitors beyond those listed above. All comparisons, recommendations, and insights must be strictly about {'this head-to-head matchup' if len(competitor_names) == 1 else 'these specific competitors'}.
 
 {comcast_context}
 
@@ -781,7 +776,7 @@ Format your responses with clear headers, bullet points, and structured insights
 
     def _call_openai(self, api_key: str, model: str, prompt: str) -> str:
         """Call OpenAI API."""
-        with httpx.Client(timeout=180.0) as client:
+        with httpx.Client(timeout=600.0) as client:
             response = client.post(
                 "https://api.openai.com/v1/chat/completions",
                 headers={
@@ -794,7 +789,7 @@ Format your responses with clear headers, bullet points, and structured insights
                         {"role": "system", "content": self._get_system_prompt()},
                         {"role": "user", "content": prompt}
                     ],
-                    "max_tokens": 8000,
+                    "max_tokens": 25000,
                     "temperature": 0.7,
                 }
             )
@@ -803,7 +798,7 @@ Format your responses with clear headers, bullet points, and structured insights
     
     def _call_xai(self, api_key: str, model: str, prompt: str) -> str:
         """Call xAI (Grok) API."""
-        with httpx.Client(timeout=240.0) as client:
+        with httpx.Client(timeout=600.0) as client:
             response = client.post(
                 "https://api.x.ai/v1/chat/completions",
                 headers={
@@ -816,7 +811,7 @@ Format your responses with clear headers, bullet points, and structured insights
                         {"role": "system", "content": self._get_system_prompt()},
                         {"role": "user", "content": prompt}
                     ],
-                    "max_tokens": 8000,
+                    "max_tokens": 25000,
                     "temperature": 0.7,
                 }
             )
@@ -825,28 +820,36 @@ Format your responses with clear headers, bullet points, and structured insights
     
     def _call_anthropic(self, api_key: str, model: str, prompt: str) -> str:
         """Call Anthropic API."""
-        with httpx.Client(timeout=240.0) as client:
+        with httpx.Client(timeout=600.0) as client:
             response = client.post(
                 "https://api.anthropic.com/v1/messages",
                 headers={
                     "x-api-key": api_key,
                     "Content-Type": "application/json",
-                    "anthropic-version": "2024-01-01",
+                    "anthropic-version": "2023-06-01",
                 },
                 json={
                     "model": model,
-                    "max_tokens": 8000,
+                    "max_tokens": 25000,
                     "system": self._get_system_prompt(),
                     "messages": [{"role": "user", "content": prompt}],
                 }
             )
+            if response.status_code != 200:
+                print(f"Anthropic API error {response.status_code}: {response.text[:500]}")
             response.raise_for_status()
-            return response.json()["content"][0]["text"]
+            data = response.json()
+            stop_reason = data.get("stop_reason", "unknown")
+            content_text = data["content"][0]["text"]
+            print(f"Anthropic competitive response: {len(content_text)} chars, stop_reason={stop_reason}")
+            if stop_reason == "max_tokens":
+                print("WARNING: Competitive analysis response was truncated due to max_tokens limit")
+            return content_text
     
     def _extract_section(self, text: str, header: str) -> str:
-        """Extract a section from the analysis text."""
+        """Extract a section from the analysis text, including ### sub-sections."""
         import re
-        pattern = rf"##\s*{header}[^\n]*\n(.*?)(?=##|\Z)"
+        pattern = rf"#{{1,3}}\s*{header}[^\n]*\n(.*?)(?=\n#{{1,2}}\s[^#]|\Z)"
         match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
         return match.group(1).strip() if match else ""
     
@@ -856,46 +859,66 @@ Format your responses with clear headers, bullet points, and structured insights
         section = self._extract_section(text, header)
         if not section:
             return []
-        
-        # Check if this is a structured recommendations section with numbered headers
-        # Pattern: **[1] Title** or 1. **Title** or [1] Title
+
+        # Split by ### sub-headers (e.g. ### Opportunity 1:, ### 1. [Priority 1])
+        sub_header_pattern = re.compile(r'^###\s+', re.MULTILINE)
+        sub_sections = sub_header_pattern.split(section)
+
+        # If we got meaningful sub-sections, group by them
+        if len(sub_sections) > 1:
+            items = []
+            for sub in sub_sections[1:]:  # skip text before first ###
+                content = sub.strip()
+                if content:
+                    items.append(content)
+            if items:
+                return items
+
+        # Fallback: numbered entries or bullet points
         numbered_pattern = re.compile(r'^(?:\*\*\[(\d+)\]|\[(\d+)\]|(\d+)[.)]\s*\*?\*?)')
-        
         lines = section.split('\n')
         items = []
         current_item_lines = []
-        
+
         for line in lines:
             stripped = line.strip()
             if not stripped:
                 continue
-            
-            # Check if this line starts a new numbered entry
+
             is_new_entry = numbered_pattern.match(stripped)
-            
+
             if is_new_entry:
-                # Save previous item if exists
                 if current_item_lines:
                     items.append('\n'.join(current_item_lines))
                 current_item_lines = [stripped]
             elif current_item_lines:
-                # Continuation of current item
                 current_item_lines.append(stripped)
             else:
-                # Simple bullet point (not multi-line)
                 if stripped.startswith(('-', '*', '•')):
                     item = stripped.lstrip('-*•').strip()
                     if item:
                         items.append(item)
-        
-        # Don't forget the last item
+
         if current_item_lines:
             items.append('\n'.join(current_item_lines))
-        
+
         return items
     
+    def _reload_analyses(self):
+        """Reload analyses from database for cross-process consistency."""
+        analyses_data = db_load(self.DB_KEY_ANALYSES)
+        if analyses_data:
+            try:
+                self._analyses = {}
+                for a_data in analyses_data:
+                    analysis = CompetitiveAnalysis(**a_data)
+                    self._analyses[analysis.id] = analysis
+            except Exception as e:
+                print(f"Warning: Could not reload analyses: {e}")
+
     def get_analyses(self, limit: int = 10) -> List[CompetitiveAnalysis]:
         """Get recent analyses."""
+        self._reload_analyses()
         analyses = sorted(
             self._analyses.values(),
             key=lambda a: a.created_at,
@@ -905,6 +928,7 @@ Format your responses with clear headers, bullet points, and structured insights
     
     def get_analysis(self, analysis_id: str) -> Optional[CompetitiveAnalysis]:
         """Get a specific analysis."""
+        self._reload_analyses()
         return self._analyses.get(analysis_id)
 
 

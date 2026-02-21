@@ -36,28 +36,27 @@ class ProductRoadmapService:
             return
         
         self._initialized = True
-        self._data_dir = Path(os.environ.get("DATA_DIR", "./data"))
-        self._intel_file = self._data_dir / "product_roadmap_intel.json"
-        self._data_dir.mkdir(parents=True, exist_ok=True)
+        
+        from src.db_utils import db_load, db_save
+        self._db_load = db_load
+        self._db_save = db_save
         
         self._intel: Optional[ProductRoadmapIntel] = self._load_intel()
     
     def _load_intel(self) -> Optional[ProductRoadmapIntel]:
-        """Load cached intel from file."""
-        if self._intel_file.exists():
+        """Load cached intel from database."""
+        data = self._db_load("product_roadmap_intel")
+        if data:
             try:
-                with open(self._intel_file, "r") as f:
-                    data = json.load(f)
                 return ProductRoadmapIntel(**data)
             except Exception as e:
                 print(f"Error loading product roadmap intel: {e}")
         return None
     
     def _save_intel(self, intel: ProductRoadmapIntel) -> None:
-        """Save intel to file."""
+        """Save intel to database."""
         try:
-            with open(self._intel_file, "w") as f:
-                json.dump(intel.model_dump(mode="json"), f, indent=2, default=str)
+            self._db_save("product_roadmap_intel", intel.model_dump(mode="json"))
             self._intel = intel
         except Exception as e:
             print(f"Error saving product roadmap intel: {e}")
@@ -89,9 +88,9 @@ class ProductRoadmapService:
         if provider_config.provider == "xai":
             import httpx
             
-            model = provider_config.model_name or "grok-4-1-fast-reasoning"
+            model = provider_config.get_default_model() or "grok-4-1-fast-reasoning"
             
-            with httpx.Client(timeout=300.0) as client:
+            with httpx.Client(timeout=600.0) as client:
                 response = client.post(
                     "https://api.x.ai/v1/chat/completions",
                     headers={
@@ -104,7 +103,7 @@ class ProductRoadmapService:
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": prompt},
                         ],
-                        "max_tokens": 12000,
+                        "max_tokens": 25000,
                         "temperature": 0.7,
                     },
                 )
@@ -115,9 +114,9 @@ class ProductRoadmapService:
         elif provider_config.provider == "openai":
             import httpx
             
-            model = provider_config.model_name or "gpt-4o"
+            model = provider_config.get_default_model() or "gpt-4o"
             
-            with httpx.Client(timeout=300.0) as client:
+            with httpx.Client(timeout=600.0) as client:
                 response = client.post(
                     "https://api.openai.com/v1/chat/completions",
                     headers={
@@ -130,7 +129,7 @@ class ProductRoadmapService:
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": prompt},
                         ],
-                        "max_tokens": 12000,
+                        "max_tokens": 25000,
                         "temperature": 0.7,
                     },
                 )
@@ -141,9 +140,9 @@ class ProductRoadmapService:
         elif provider_config.provider == "anthropic":
             import httpx
             
-            model = provider_config.model_name or "claude-3-5-sonnet-20241022"
+            model = provider_config.get_default_model()
             
-            with httpx.Client(timeout=300.0) as client:
+            with httpx.Client(timeout=600.0) as client:
                 response = client.post(
                     "https://api.anthropic.com/v1/messages",
                     headers={
@@ -153,16 +152,23 @@ class ProductRoadmapService:
                     },
                     json={
                         "model": model,
-                        "max_tokens": 12000,
+                        "max_tokens": 25000,
                         "system": system_prompt,
                         "messages": [
                             {"role": "user", "content": prompt},
                         ],
                     },
                 )
+                if response.status_code != 200:
+                    print(f"Anthropic API error {response.status_code}: {response.text[:500]}")
                 response.raise_for_status()
                 data = response.json()
-                return data["content"][0]["text"], provider_config.provider.value, model
+                stop_reason = data.get("stop_reason", "unknown")
+                content_text = data["content"][0]["text"]
+                print(f"Anthropic product roadmap response: {len(content_text)} chars, stop_reason={stop_reason}")
+                if stop_reason == "max_tokens":
+                    print("WARNING: Product roadmap response was truncated due to max_tokens limit")
+                return content_text, provider_config.provider.value, model
         
         else:
             raise ValueError(f"Unsupported LLM provider: {provider_config.provider}")
