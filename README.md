@@ -1,4 +1,4 @@
-# Enterprise Strategy Platform v0.9
+# Enterprise Strategy Platform v1.0
 
 A BCG/Bain-quality strategic analysis platform for Comcast Business Enterprise executives. Combines public market intelligence, internal business data, competitive analysis, and AI-powered insights to support growth from **$4B ARR at 14%** to **15%+ annual growth**.
 
@@ -30,9 +30,9 @@ A BCG/Bain-quality strategic analysis platform for Comcast Business Enterprise e
 
 ### Prerequisites
 
-- Docker & Docker Compose
+- Docker Engine 27+ and Docker Compose v2.30+
 - 4GB+ RAM
-- LLM API key (xAI Grok recommended)
+- LLM API key (xAI Grok recommended, Anthropic Claude supported)
 
 ### Docker Deployment (Recommended)
 
@@ -65,6 +65,7 @@ GTMEnt/
 ├── src/                          # Python Backend (FastAPI)
 │   ├── api/                      # Main API application
 │   ├── admin/                    # Admin configuration & user management
+│   ├── auth/                     # JWT authentication & middleware
 │   ├── cb_config/                # Comcast Business configuration
 │   ├── competitive/              # Competitive intelligence service
 │   ├── insights/                 # Q&A insights service
@@ -73,38 +74,111 @@ GTMEnt/
 │   ├── product_roadmap/          # Product analysis service
 │   ├── segments/                 # Segment & MSA analysis
 │   ├── strategy_report/          # Strategy report generation
-│   └── voice/                    # Voice AI WebSocket proxy
+│   ├── tasks/                    # Celery async task definitions
+│   ├── voice/                    # Voice AI WebSocket proxy
+│   ├── celery_app.py             # Celery application config
+│   ├── database.py               # SQLAlchemy engine & session
+│   ├── db_models.py              # ORM models (User, Job, AppConfig)
+│   └── db_utils.py               # DB key-value helpers
 │
 ├── frontend/                     # React/TypeScript Frontend
 │   ├── src/
 │   │   ├── components/           # Reusable UI components
 │   │   ├── context/              # React contexts (auth, config, voice)
 │   │   ├── lib/voice-agent/      # Voice AI client implementations
+│   │   ├── utils/                # API helpers
 │   │   └── pages/                # Page components
 │   └── package.json
 │
-├── docker-compose.yml            # Docker orchestration
-├── Dockerfile                    # Multi-stage build
-└── requirements.txt              # Python dependencies
+├── alembic/                      # Database migrations
+├── docker-compose.yml            # Docker orchestration (4 services)
+├── Dockerfile                    # Multi-stage build (Node + Python)
+└── requirements.txt              # Python dependencies (pinned)
 ```
+
+## Version Matrix
+
+All versions below are what this project was built and tested against. Using different major versions may cause compatibility issues.
+
+### Infrastructure
+
+| Component | Version | Image / Source |
+|-----------|---------|----------------|
+| Docker Engine | 29.1.2 | Desktop |
+| Docker Compose | 2.40.3 | Desktop plugin |
+| PostgreSQL | 16.12 | `postgres:16-alpine` |
+| Redis | 7.4.7 | `redis:7-alpine` |
+| Python | 3.11.14 | `python:3.11-slim` |
+| Node.js | 20.x (LTS) | `node:20-alpine` (build stage only) |
+| Gunicorn | 25.1.0 | pip |
+
+### Backend (Python) — Key Packages
+
+| Package | Pinned Version | Purpose |
+|---------|---------------|---------|
+| fastapi | 0.129.2 | Web framework |
+| uvicorn | 0.41.0 | ASGI server (Gunicorn worker) |
+| sqlalchemy | 2.0.46 | ORM / database toolkit |
+| alembic | 1.18.4 | Database migrations |
+| psycopg2-binary | 2.9.11 | PostgreSQL driver |
+| celery | 5.6.2 | Async task queue |
+| redis | 6.4.0 | Redis client (Celery broker) |
+| pydantic | 2.12.5 | Data validation |
+| python-jose | 3.5.0 | JWT token handling |
+| passlib | 1.7.4 | Password hashing |
+| bcrypt | 4.0.1 | bcrypt backend (pinned — 4.1+ breaks passlib) |
+| openai | 2.21.0 | OpenAI / xAI API client |
+| langchain | 1.2.10 | LLM orchestration |
+| langchain-openai | 1.1.10 | LangChain OpenAI integration |
+| httpx | 0.28.1 | Async HTTP client |
+| beautifulsoup4 | 4.14.3 | HTML parsing (web scraping) |
+| pandas | 3.0.1 | Data processing |
+| numpy | 2.4.2 | Numerical operations |
+| slowapi | 0.1.9 | Rate limiting |
+| chromadb | 1.5.1 | Vector store |
+
+### Frontend (Node.js) — Key Packages
+
+| Package | Version | Purpose |
+|---------|---------|---------|
+| react | ^18.2.0 | UI framework |
+| react-dom | ^18.2.0 | React DOM renderer |
+| react-router-dom | ^6.22.1 | Client-side routing |
+| typescript | ^5.3.3 | Type checking |
+| vite | ^5.1.4 | Build tool / dev server |
+| tailwindcss | ^3.4.1 | Utility CSS framework |
+| framer-motion | ^11.0.8 | Animations |
+| @heroicons/react | ^2.1.1 | Icon library |
+| @headlessui/react | ^1.7.18 | Accessible UI primitives |
+| recharts | ^2.12.2 | Charts |
+| react-markdown | ^9.0.1 | Markdown rendering |
+
+### Known Version Constraints
+
+| Constraint | Reason |
+|------------|--------|
+| `bcrypt==4.0.1` | passlib 1.7.4 is incompatible with bcrypt 4.1+ (`__about__` removed) |
+| `python:3.11-slim` | Python 3.12+ has breaking changes with some deps; 3.11 is stable LTS |
+| `node:20-alpine` | LTS line; used only in Docker build stage, not at runtime |
+| `postgres:16-alpine` | Tested with PG 16; PG 17 should work but is untested |
 
 ## Data Persistence
 
-All data is persisted in `/app/data` (Docker volume: `gtm-app-data`):
+All data is persisted in PostgreSQL (Docker volume: `gtm-postgres-data`):
 
-| File | Description |
-|------|-------------|
-| `admin_config.json` | API keys, users, voice settings |
-| `cb_config.json` | Company metrics, segment config |
-| `competitive_analyses.json` | All competitive LLM analyses |
-| `competitors.json` | Scraped competitor data |
-| `msa_intel.json` | MSA market intelligence (48 MSAs) |
-| `segment_intel.json` | Segment LLM analyses |
-| `strategy_reports.json` | Generated strategy reports |
-| `product_roadmap_intel.json` | Product roadmap analysis |
-| `insights.json` | Q&A conversation history |
-| `public_data_cache.json` | Cached public data sources |
-| `job_queue.json` | Background job tracking |
+| Table / Key Pattern | Description |
+|---------------------|-------------|
+| `users` | User accounts (JWT auth) |
+| `jobs` | Background job tracking and status |
+| `app_config.admin_config` | API keys, voice settings |
+| `app_config.cb_config` | Company metrics, segment config |
+| `app_config.competitive_*` | Competitor data and LLM analyses |
+| `app_config.msa_intel` | MSA market intelligence (48 MSAs) |
+| `app_config.segment_intel` | Segment LLM analyses |
+| `app_config.strategy_*` | Strategy reports |
+| `app_config.product_*` | Product roadmap analysis |
+| `app_config.insights_*` | Q&A conversation history |
+| `app_config.summary_*` | Cached LLM summaries |
 
 ## Segment Tiers
 
@@ -159,20 +233,17 @@ All data is persisted in `/app/data` (Docker volume: `gtm-app-data`):
 ### Data Migration
 
 ```bash
-# On development machine - export data
-docker run --rm -v gtment_gtm-app-data:/data -v $(pwd):/backup alpine \
-  tar cvf /backup/gtm-data-backup.tar /data
+# Export PostgreSQL data
+docker compose exec postgres pg_dump -U gtm_user gtm_enterprise > gtm-backup.sql
 
 # Transfer to production
-scp gtm-data-backup.tar user@production:/path/to/GTMEnt/
+scp gtm-backup.sql user@production:/path/to/GTMEnt/
 
-# On production - import data
-docker volume create gtment_gtm-app-data
-docker run --rm -v gtment_gtm-app-data:/data -v $(pwd):/backup alpine \
-  sh -c "cd /data && tar xvf /backup/gtm-data-backup.tar --strip 1"
+# On production — import data
+docker compose exec -T postgres psql -U gtm_user gtm_enterprise < gtm-backup.sql
 
 # Start the application
-docker-compose up -d
+docker compose up -d
 ```
 
 ### Environment Variables
@@ -181,6 +252,10 @@ docker-compose up -d
 |----------|---------|-------------|
 | `APP_ENV` | production | Environment mode |
 | `LOG_LEVEL` | INFO | Logging verbosity |
+| `DATABASE_URL` | postgresql://... | PostgreSQL connection string |
+| `REDIS_URL` | redis://gtm-redis:6379/0 | Redis connection for Celery |
+| `JWT_SECRET` | (auto-generated) | Secret key for JWT tokens |
+| `GATE_ACCESS_CODE` | (set in admin) | Shared access code for registration |
 | `CHROMA_PERSIST_DIR` | /app/data/chroma | ChromaDB storage |
 
 ## Voice AI Agent
@@ -206,12 +281,19 @@ The platform includes a real-time voice AI advisor powered by xAI Grok:
 
 ### Local Development (without Docker)
 
+Requires PostgreSQL 16+ and Redis 7+ running locally.
+
 ```bash
 # Backend
 python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
+export DATABASE_URL="postgresql://gtm_user:gtm_pass@localhost:5432/gtm_enterprise"
+export REDIS_URL="redis://localhost:6379/0"
 uvicorn src.api.app:app --host 0.0.0.0 --port 3700 --reload
+
+# Celery worker (separate terminal)
+celery -A src.celery_app worker --loglevel=info
 
 # Frontend (separate terminal)
 cd frontend
@@ -222,9 +304,9 @@ npm run dev
 ### Rebuilding After Changes
 
 ```bash
-docker-compose down
-docker-compose build
-docker-compose up -d
+docker compose down
+docker compose build
+docker compose up -d
 ```
 
 ## Troubleshooting
