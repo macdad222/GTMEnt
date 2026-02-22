@@ -16,6 +16,7 @@ import { CompetitiveIntel } from './pages/CompetitiveIntel'
 import { QuestionsInsights } from './pages/QuestionsInsights'
 import { StrategyReport } from './pages/StrategyReport'
 import { Documentation } from './pages/Documentation'
+import { FeatureRequests } from './pages/FeatureRequests'
 import { Login } from './pages/Login'
 import { GatePage } from './pages/GatePage'
 import { Register } from './pages/Register'
@@ -60,6 +61,7 @@ export default function App() {
             <Route path="insights" element={<QuestionsInsights />} />
             <Route path="strategy-report" element={<StrategyReport />} />
             <Route path="docs" element={<Documentation />} />
+            <Route path="feature-requests" element={<FeatureRequests />} />
           </Route>
         </Routes>
         <GlobalVoiceAgent />

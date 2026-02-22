@@ -459,7 +459,7 @@ export function Documentation() {
           <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700/50 relative">
             <div className="absolute -top-3 -left-3 w-8 h-8 rounded-full bg-brand-500 flex items-center justify-center text-white font-bold">1</div>
             <h4 className="text-white font-semibold mt-2 mb-2">Configure LLM</h4>
-            <p className="text-xs text-slate-400">Add your Grok, OpenAI, or Anthropic API key in the LLM Providers tab</p>
+            <p className="text-xs text-slate-400">Add your Anthropic, Grok, or OpenAI API key in the LLM Providers tab (Anthropic Claude Sonnet 4.6 preferred)</p>
           </div>
           <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700/50 relative">
             <div className="absolute -top-3 -left-3 w-8 h-8 rounded-full bg-brand-500 flex items-center justify-center text-white font-bold">2</div>

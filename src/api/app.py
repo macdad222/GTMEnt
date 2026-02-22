@@ -22,6 +22,7 @@ from src.product_roadmap.routes import router as product_roadmap_router
 from src.insights.routes import router as insights_router
 from src.strategy_report.routes import router as strategy_report_router
 from src.voice.routes import router as voice_router
+from src.feature_requests.routes import router as feature_requests_router
 from src.database import init_db
 from src.config import get_settings
 
@@ -79,6 +80,7 @@ def create_app() -> FastAPI:
     app.include_router(insights_router, prefix="/api")
     app.include_router(strategy_report_router, prefix="/api")
     app.include_router(voice_router, prefix="/api")
+    app.include_router(feature_requests_router, prefix="/api")
 
     # Serve static files (frontend)
     # Try multiple possible locations for the frontend dist

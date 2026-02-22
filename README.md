@@ -20,7 +20,7 @@ A BCG/Bain-quality strategic analysis platform for Comcast Business Enterprise e
 
 ### 🤖 AI-Powered Analysis
 
-- **LLM Integration**: xAI Grok, OpenAI GPT-4, Anthropic Claude
+- **LLM Integration**: Anthropic Claude Sonnet 4.6 (preferred), xAI Grok, OpenAI GPT-4
 - **Voice AI Agent**: Real-time voice conversations using Grok Realtime API
 - **Competitive Analysis**: Automated website scraping with LLM synthesis
 - **Market Research**: AI-generated research with cited sources
@@ -32,7 +32,7 @@ A BCG/Bain-quality strategic analysis platform for Comcast Business Enterprise e
 
 - Docker Engine 27+ and Docker Compose v2.30+
 - 4GB+ RAM
-- LLM API key (xAI Grok recommended, Anthropic Claude supported)
+- LLM API key (Anthropic Claude Sonnet 4.6 preferred, xAI Grok also supported)
 
 ### Docker Deployment (Recommended)
 
@@ -55,7 +55,7 @@ The app will be available at `http://localhost:3700`
 1. Navigate to `http://localhost:3700`
 2. Login with default credentials: `admin` / `admin`
 3. Change your password when prompted
-4. Go to **Settings** → Configure your LLM API key (xAI Grok recommended)
+4. Go to **Settings** → Configure your LLM API key (Anthropic Claude Sonnet 4.6 preferred)
 5. Go to **Settings** → Update CB Data with your enterprise metrics
 
 ## Architecture
