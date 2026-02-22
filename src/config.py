@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     # Auth
     jwt_secret: str = "change-me-in-production-use-a-real-secret"
     jwt_algorithm: str = "HS256"
-    jwt_expiry_hours: int = 72
+    jwt_expiry_hours: int = 1
     gate_access_code: str = "ComcastGTM2026"
 
     # OpenAI

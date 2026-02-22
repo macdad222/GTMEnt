@@ -101,18 +101,24 @@ const HorizontalBarChart: React.FC<{
   maxValue?: number;
 }> = ({ items, title, icon: Icon, maxValue = 100 }) => (
   <div className="bg-slate-800/60 rounded-xl p-5 border border-slate-700/50">
-    <div className="flex items-center gap-2 mb-4">
-      <Icon className="h-5 w-5 text-slate-400" />
+    <div className="flex items-center gap-2 mb-5">
+      <Icon className="h-5 w-5 text-emerald-400" />
       <h4 className="font-semibold text-white">{title}</h4>
+      <span className="ml-auto text-xs text-slate-500">{items.length} priorities</span>
     </div>
-    <div className="space-y-3">
+    <div className="space-y-4">
       {items.map((item, i) => (
-        <div key={i}>
-          <div className="flex justify-between text-sm mb-1">
-            <span className="text-slate-300 truncate pr-2">{item.label}</span>
-            <span className="text-slate-400">{item.value}%</span>
+        <div key={i} className="group">
+          <div className="flex items-center gap-2.5 mb-1.5">
+            <span className="flex-shrink-0 w-5 h-5 rounded-full bg-gradient-to-br from-slate-600 to-slate-700 flex items-center justify-center text-[10px] font-bold text-white">
+              {i + 1}
+            </span>
+            <span className="text-sm text-slate-300 truncate flex-1 group-hover:text-white transition-colors">
+              {item.label}
+            </span>
+            <span className="text-xs text-slate-500 tabular-nums flex-shrink-0">{item.value}</span>
           </div>
-          <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
+          <div className="h-2 bg-slate-700/60 rounded-full overflow-hidden ml-[1.875rem]">
             <motion.div
               initial={{ width: 0 }}
               animate={{ width: `${(item.value / maxValue) * 100}%` }}
@@ -452,6 +458,13 @@ interface ParsedRecommendation {
   complexityDetail?: string;
 }
 
+function cleanRecTitle(raw: string): string {
+  return raw
+    .replace(/^\d+\.\s*/, '')
+    .replace(/\[Priority\s*\d+\]\s*/i, '')
+    .trim();
+}
+
 function parseRecommendation(rec: string): ParsedRecommendation {
   const lines = rec.split('\n').map(l => l.trim()).filter(l => l && l !== '---');
 
@@ -464,39 +477,41 @@ function parseRecommendation(rec: string): ParsedRecommendation {
   let complexityDetail: string | undefined;
 
   for (const line of lines) {
-    const titleMatch = line.match(/^\d+\.\s*\[Priority\s*(\d+)\]\s*\*\*(.+?)\*\*/i);
+    const titleMatch = line.match(/^\*{0,2}\d+\.\s*\[Priority\s*(\d+)\]\s*(.+?)\*{0,2}\s*$/i);
     if (titleMatch) {
       priority = parseInt(titleMatch[1]);
-      title = titleMatch[2].trim();
+      title = cleanRecTitle(titleMatch[2].replace(/\*\*/g, '').trim());
       continue;
     }
 
     if (!title) {
       const boldMatch = line.match(/\*\*(.+?)\*\*/);
       if (boldMatch) {
-        title = boldMatch[1].trim();
-        const priMatch = line.match(/\[?Priority\s*(\d+)\]?|\[(\d+)\]|^(\d+)\./i);
-        if (priMatch) priority = parseInt(priMatch[1] || priMatch[2] || priMatch[3]);
+        const raw = boldMatch[1].trim();
+        const priMatch = raw.match(/\[?Priority\s*(\d+)\]?/i) || line.match(/^(\d+)\./);
+        if (priMatch) priority = parseInt(priMatch[1]);
+        title = cleanRecTitle(raw);
         continue;
       }
-      title = line.replace(/\*\*/g, '').replace(/^\d+\.\s*/, '').trim();
+      title = cleanRecTitle(line.replace(/\*\*/g, ''));
       continue;
     }
 
-    const fieldMatch = line.match(/^[•\-*]?\s*\*\*([^*:]+)\*\*:?\s*(.+)/);
+    const fieldMatch = line.match(/^[•\-*]?\s*\*\*([^*]+?):?\*\*:?\s*(.+)/);
     if (fieldMatch) {
-      const label = fieldMatch[1].trim().toLowerCase();
+      const label = fieldMatch[1].trim().replace(/:$/, '').toLowerCase();
       const value = fieldMatch[2].replace(/\*\*/g, '').trim();
 
       if (label === 'action') action = value;
       else if (label === 'rationale') rationale = value;
       else if (label.includes('success') || label.includes('metric')) successMetric = value;
       else if (label === 'complexity') {
-        const cleaned = value.replace(/[🟢🟡🔴⚪️]/gu, '').trim();
-        const dashIdx = cleaned.indexOf('—');
-        if (dashIdx > 0) {
-          complexity = cleaned.substring(0, dashIdx).trim();
-          complexityDetail = cleaned.substring(dashIdx + 1).trim();
+        const cleaned = value.replace(/[🟢🟡🔴⚪️]/gu, '').replace(/\*\*/g, '').trim();
+        // Split on em-dash, en-dash, or opening parenthesis
+        const splitMatch = cleaned.match(/^([^—–(]+)[—–(]\s*(.+?)\)?$/);
+        if (splitMatch) {
+          complexity = splitMatch[1].trim();
+          complexityDetail = splitMatch[2].replace(/\)$/, '').trim();
         } else {
           complexity = cleaned;
         }
@@ -511,7 +526,16 @@ function parseRecommendation(rec: string): ParsedRecommendation {
       if (label === 'action') action = value;
       else if (label === 'rationale') rationale = value;
       else if (label.includes('success')) successMetric = value;
-      else if (label === 'complexity') complexity = value.replace(/[🟢🟡🔴⚪️]/gu, '').replace(/\s*—.*/, '').trim();
+      else if (label === 'complexity') {
+        const cleaned = value.replace(/[🟢🟡🔴⚪️]/gu, '').trim();
+        const splitMatch = cleaned.match(/^([^—–(]+)[—–(]\s*(.+?)\)?$/);
+        if (splitMatch) {
+          complexity = splitMatch[1].trim();
+          complexityDetail = splitMatch[2].replace(/\)$/, '').trim();
+        } else {
+          complexity = cleaned;
+        }
+      }
     }
   }
 
@@ -519,13 +543,30 @@ function parseRecommendation(rec: string): ParsedRecommendation {
 }
 
 // Styled Recommendation Card
+const RecFieldBlock: React.FC<{
+  icon: React.ElementType;
+  label: string;
+  color: string;
+  borderColor: string;
+  bgColor: string;
+  text: string;
+}> = ({ icon: Icon, label, color, borderColor, bgColor, text }) => (
+  <div className={`rounded-lg ${bgColor} border-l-[3px] ${borderColor} pl-3 pr-3 py-2.5`}>
+    <div className="flex items-center gap-1.5 mb-1">
+      <Icon className={`h-3.5 w-3.5 ${color}`} />
+      <span className={`text-[10px] font-bold ${color} uppercase tracking-wider`}>{label}</span>
+    </div>
+    <p className="text-slate-300 text-sm leading-relaxed">{text}</p>
+  </div>
+);
+
 const RecommendationCard: React.FC<{ rec: string; index: number }> = ({ rec, index }) => {
   const parsed = parseRecommendation(rec);
 
   const complexityConfig: Record<string, { badge: string; accent: string }> = {
-    'low': { badge: 'bg-green-500/20 text-green-400 border-green-500/30', accent: 'text-green-400' },
+    'low':    { badge: 'bg-green-500/20 text-green-400 border-green-500/30', accent: 'text-green-400' },
     'medium': { badge: 'bg-amber-500/20 text-amber-400 border-amber-500/30', accent: 'text-amber-400' },
-    'high': { badge: 'bg-red-500/20 text-red-400 border-red-500/30', accent: 'text-red-400' },
+    'high':   { badge: 'bg-red-500/20 text-red-400 border-red-500/30', accent: 'text-red-400' },
   };
 
   const cKey = Object.keys(complexityConfig).find(k => (parsed.complexity || '').toLowerCase().includes(k)) || 'medium';
@@ -533,73 +574,61 @@ const RecommendationCard: React.FC<{ rec: string; index: number }> = ({ rec, ind
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: index * 0.08 }}
-      className="p-4 bg-gradient-to-br from-emerald-900/20 to-slate-800/50 rounded-xl border border-emerald-500/20 hover:border-emerald-500/40 transition-all"
+      initial={{ opacity: 0, x: -10 }}
+      animate={{ opacity: 1, x: 0 }}
+      transition={{ delay: index * 0.06 }}
+      className="bg-gradient-to-r from-emerald-900/15 to-slate-800/40 rounded-xl border border-emerald-500/15 hover:border-emerald-500/35 transition-all overflow-hidden"
     >
-      {/* Title Row */}
-      <div className="flex items-start gap-3 mb-3">
+      {/* Header */}
+      <div className="flex items-center gap-3 px-4 py-3 bg-emerald-500/5 border-b border-emerald-500/10">
         <div className="flex-shrink-0 w-7 h-7 rounded-full bg-gradient-to-br from-emerald-500 to-emerald-600 flex items-center justify-center text-white font-bold text-xs shadow-lg">
           {parsed.priority || index + 1}
         </div>
-        <div className="flex-1 min-w-0">
-          <h4 className="font-semibold text-emerald-300">{parsed.title}</h4>
+        <h4 className="font-semibold text-emerald-300 flex-1">{parsed.title}</h4>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {parsed.complexity && (
+            <span className={`px-2.5 py-0.5 text-xs font-medium rounded-full border ${cStyle.badge}`}>
+              {parsed.complexity}
+            </span>
+          )}
         </div>
-        {parsed.complexity && (
-          <span className={`flex-shrink-0 px-2 py-0.5 text-xs rounded-full border ${cStyle.badge}`}>
-            {parsed.complexity}
-          </span>
-        )}
       </div>
 
-      {/* Action */}
-      {parsed.action && (
-        <div className="flex items-start gap-2 mb-2.5">
-          <BoltIcon className="h-4 w-4 text-blue-400 mt-0.5 flex-shrink-0" />
-          <div>
-            <span className="text-xs font-medium text-blue-400 uppercase tracking-wide">Action</span>
-            <p className="text-slate-300 text-sm leading-relaxed">{parsed.action}</p>
+      {/* Structured body */}
+      <div className="p-4 space-y-2.5">
+        {parsed.action && (
+          <RecFieldBlock
+            icon={BoltIcon} label="Action" color="text-blue-400"
+            borderColor="border-blue-500/50" bgColor="bg-blue-500/5"
+            text={parsed.action}
+          />
+        )}
+        {parsed.rationale && (
+          <RecFieldBlock
+            icon={LightBulbIcon} label="Rationale" color="text-amber-400"
+            borderColor="border-amber-500/50" bgColor="bg-amber-500/5"
+            text={parsed.rationale}
+          />
+        )}
+        {parsed.successMetric && (
+          <RecFieldBlock
+            icon={ArrowTrendingUpIcon} label="Success Metric" color="text-green-400"
+            borderColor="border-green-500/50" bgColor="bg-green-500/5"
+            text={parsed.successMetric}
+          />
+        )}
+        {parsed.complexityDetail && (
+          <div className="flex items-start gap-2 pt-1 px-1">
+            <ExclamationTriangleIcon className={`h-3.5 w-3.5 ${cStyle.accent} mt-0.5 flex-shrink-0`} />
+            <p className="text-slate-500 text-xs italic">{parsed.complexityDetail}</p>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Rationale */}
-      {parsed.rationale && (
-        <div className="flex items-start gap-2 mb-2.5">
-          <LightBulbIcon className="h-4 w-4 text-amber-400 mt-0.5 flex-shrink-0" />
-          <div>
-            <span className="text-xs font-medium text-amber-400 uppercase tracking-wide">Rationale</span>
-            <p className="text-slate-300 text-sm leading-relaxed">{parsed.rationale}</p>
-          </div>
-        </div>
-      )}
-
-      {/* Bottom Row: Success Metric + Complexity Detail */}
-      {(parsed.successMetric || parsed.complexityDetail) && (
-        <div className="mt-3 pt-3 border-t border-emerald-500/10 space-y-2">
-          {parsed.successMetric && (
-            <div className="flex items-start gap-2">
-              <ArrowTrendingUpIcon className="h-4 w-4 text-green-400 mt-0.5 flex-shrink-0" />
-              <div>
-                <span className="text-xs font-medium text-green-400 uppercase tracking-wide">Success Metric</span>
-                <p className="text-slate-400 text-sm">{parsed.successMetric}</p>
-              </div>
-            </div>
-          )}
-          {parsed.complexityDetail && (
-            <div className="flex items-start gap-2">
-              <ExclamationTriangleIcon className={`h-4 w-4 ${cStyle.accent} mt-0.5 flex-shrink-0`} />
-              <p className="text-slate-500 text-xs italic">{parsed.complexityDetail}</p>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Fallback for unstructured recommendations */}
-      {!parsed.action && !parsed.rationale && (
-        <p className="text-slate-300 text-sm ml-10">{rec.replace(/\*\*/g, '').replace(/^[\d.]+\s*/, '')}</p>
-      )}
+        {/* Fallback */}
+        {!parsed.action && !parsed.rationale && (
+          <p className="text-slate-300 text-sm">{rec.replace(/\*\*/g, '').replace(/^[\d.]+\s*/, '')}</p>
+        )}
+      </div>
     </motion.div>
   );
 };
@@ -945,9 +974,9 @@ const StyledMarkdownTable: React.FC<{ content: string }> = ({ content }) => {
 
 // Format markdown analysis text into styled sections
 const FormattedAnalysisText: React.FC<{ content: string }> = ({ content }) => {
-  // Split by headers (## Header)
+  // Split by ## headers (but not ### which are sub-sections)
   const sections = content.split(/(?=^## )/m).filter(Boolean);
-  
+
   const sectionIcons: Record<string, React.ElementType> = {
     'executive': SparklesIcon,
     'product': ScaleIcon,
@@ -958,12 +987,14 @@ const FormattedAnalysisText: React.FC<{ content: string }> = ({ content }) => {
     'strengths': TrophyIcon,
     'weaknesses': ArrowTrendingDownIcon,
     'win': CheckCircleIcon,
+    'competitive win': CheckCircleIcon,
     'opportunities': LightBulbIcon,
     'threats': ShieldExclamationIcon,
     'recommendations': LightBulbIcon,
     'key': SparklesIcon,
+    'takeaway': SparklesIcon,
   };
-  
+
   const sectionColors: Record<string, string> = {
     'executive': 'purple',
     'product': 'amber',
@@ -974,28 +1005,31 @@ const FormattedAnalysisText: React.FC<{ content: string }> = ({ content }) => {
     'strengths': 'emerald',
     'weaknesses': 'red',
     'win': 'teal',
+    'competitive win': 'teal',
     'opportunities': 'cyan',
     'threats': 'red',
     'recommendations': 'emerald',
     'key': 'purple',
+    'takeaway': 'purple',
   };
-  
+
   return (
     <div className="space-y-6">
       {sections.map((section, i) => {
         const headerMatch = section.match(/^##\s*(.+)$/m);
-        const header = headerMatch?.[1]?.trim() || '';
+        const header = headerMatch?.[1]?.trim().replace(/\*\*/g, '') || '';
         const body = section.replace(/^##\s*.+$/m, '').trim();
-        
-        // Find matching icon/color
+
+        // Skip the top-level title / confidential lines
+        if (!header || header.startsWith('#') || header.toLowerCase().includes('confidential')) return null;
+
         const headerLower = header.toLowerCase();
-        let iconKey = Object.keys(sectionIcons).find(key => headerLower.includes(key)) || 'executive';
+        const iconKey = Object.keys(sectionIcons).find(key => headerLower.includes(key)) || 'executive';
         const Icon = sectionIcons[iconKey];
         const color = sectionColors[iconKey] || 'slate';
-        
-        // Check if this section contains a table
+
         const hasTable = containsMarkdownTable(body);
-        
+
         return (
           <motion.div
             key={i}
@@ -1029,39 +1063,68 @@ const FormattedAnalysisText: React.FC<{ content: string }> = ({ content }) => {
   );
 };
 
-// Format body text with bullet points, bold, etc.
+// Format body text with sub-headers, bullets, separators, and bold lines
 function formatBodyText(text: string): React.ReactNode {
-  // Replace markdown bold with styled spans
   const lines = text.split('\n');
-  
+
   return (
     <div className="space-y-2">
       {lines.map((line, i) => {
         const trimmed = line.trim();
         if (!trimmed) return null;
-        
-        // Check for bullet points
+
+        // --- horizontal rule
+        if (/^-{3,}$/.test(trimmed)) {
+          return <hr key={i} className="border-slate-700/50 my-3" />;
+        }
+
+        // ### Sub-header
+        const subHeader = trimmed.match(/^###\s+(.+)$/);
+        if (subHeader) {
+          return (
+            <div key={i} className="flex items-center gap-2 mt-4 mb-1">
+              <div className="h-px flex-1 max-w-[2rem] bg-blue-500/40" />
+              <h4 className="text-sm font-semibold text-blue-300 uppercase tracking-wide"
+                dangerouslySetInnerHTML={{ __html: formatInlineMarkdown(subHeader[1]) }}
+              />
+              <div className="h-px flex-1 bg-blue-500/20" />
+            </div>
+          );
+        }
+
+        // Bold-only line as a mini-header (e.g., "**Geographic Focus:**")
+        const boldLine = trimmed.match(/^\*\*([^*]+)\*\*:?\s*$/);
+        if (boldLine) {
+          return (
+            <h5 key={i} className="text-white font-semibold mt-3 mb-0.5 text-sm">
+              {boldLine[1].replace(/:$/, '')}
+            </h5>
+          );
+        }
+
+        // Bullet points
         const isBullet = trimmed.match(/^[-•*]\s+(.+)$/);
-        const isNumbered = trimmed.match(/^(\d+)[.)]\s+(.+)$/);
-        
         if (isBullet) {
           return (
             <div key={i} className="flex items-start gap-2 ml-2">
-              <span className="text-blue-400 mt-1">•</span>
+              <span className="text-blue-400 mt-1 flex-shrink-0">•</span>
               <span dangerouslySetInnerHTML={{ __html: formatInlineMarkdown(isBullet[1]) }} />
             </div>
           );
         }
-        
+
+        // Numbered items
+        const isNumbered = trimmed.match(/^(\d+)[.)]\s+(.+)$/);
         if (isNumbered) {
           return (
             <div key={i} className="flex items-start gap-2 ml-2">
-              <span className="text-emerald-400 font-medium min-w-[1.5rem]">{isNumbered[1]}.</span>
+              <span className="text-emerald-400 font-medium min-w-[1.5rem] flex-shrink-0">{isNumbered[1]}.</span>
               <span dangerouslySetInnerHTML={{ __html: formatInlineMarkdown(isNumbered[2]) }} />
             </div>
           );
         }
-        
+
+        // Plain paragraph
         return (
           <p key={i} dangerouslySetInnerHTML={{ __html: formatInlineMarkdown(trimmed) }} />
         );
@@ -1070,12 +1133,13 @@ function formatBodyText(text: string): React.ReactNode {
   );
 }
 
-// Format inline markdown (bold, italic)
+// Format inline markdown (bold, italic, code)
 function formatInlineMarkdown(text: string): string {
   return text
     .replace(/\*\*(.+?)\*\*/g, '<strong class="text-white font-semibold">$1</strong>')
     .replace(/\*(.+?)\*/g, '<em class="text-slate-200">$1</em>')
-    .replace(/`(.+?)`/g, '<code class="px-1 py-0.5 bg-slate-700 rounded text-amber-300 text-xs">$1</code>');
+    .replace(/`(.+?)`/g, '<code class="px-1 py-0.5 bg-slate-700 rounded text-amber-300 text-xs">$1</code>')
+    .replace(/[🔴🟢🟡⚪🔵⏱️🏆📊📈📉🎯💡🛡️⚡🚀]/gu, '');
 }
 
 // Analysis Section with enhanced visuals
@@ -1168,7 +1232,7 @@ export function CompetitiveIntel() {
     }
   });
   const [showAddModal, setShowAddModal] = useState(false);
-  const [activeTab, setActiveTab] = useState<'compare' | 'analyses'>('compare');
+  const [activeTab, setActiveTab] = useState<'compare' | 'analyses' | 'setup'>('compare');
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     summary: true,
     charts: true,
@@ -1450,14 +1514,23 @@ export function CompetitiveIntel() {
   // Generate chart data from analysis
   const getRecommendationPriorities = () => {
     if (!currentAnalysis) return [];
-    return currentAnalysis.recommendations.slice(0, 5).map((rec, i) => ({
-      label: rec.split(':')[0].slice(0, 30) + (rec.length > 30 ? '...' : ''),
-      value: 100 - (i * 15),
-      color: i === 0 ? 'from-emerald-500 to-emerald-400' : 
-             i === 1 ? 'from-blue-500 to-blue-400' :
-             i === 2 ? 'from-purple-500 to-purple-400' :
-             'from-slate-500 to-slate-400',
-    }));
+    const priorityColors = [
+      'from-emerald-500 to-emerald-400',
+      'from-blue-500 to-blue-400',
+      'from-purple-500 to-purple-400',
+      'from-cyan-500 to-cyan-400',
+      'from-amber-500 to-amber-400',
+      'from-rose-500 to-rose-400',
+      'from-indigo-500 to-indigo-400',
+    ];
+    return currentAnalysis.recommendations.slice(0, 7).map((rec, i) => {
+      const parsed = parseRecommendation(rec);
+      return {
+        label: parsed.title || `Recommendation ${i + 1}`,
+        value: 100 - (i * 12),
+        color: priorityColors[i] || 'from-slate-500 to-slate-400',
+      };
+    });
   };
 
   const getRadarDimensions = () => [
@@ -1539,6 +1612,25 @@ export function CompetitiveIntel() {
           }`}
         >
           <div className="flex items-center gap-2">
+            <DocumentTextIcon className="h-5 w-5" />
+            Analysis Report
+          </div>
+          {activeTab === 'analyses' && (
+            <motion.div
+              layoutId="tab-indicator"
+              className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-400"
+            />
+          )}
+        </button>
+        <button
+          onClick={() => setActiveTab('setup')}
+          className={`px-4 py-3 font-medium transition-colors relative ${
+            activeTab === 'setup'
+              ? 'text-blue-400'
+              : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          <div className="flex items-center gap-2">
             <ChartBarIcon className="h-5 w-5" />
             Analysis History
             {recentAnalyses.length > 0 && (
@@ -1547,7 +1639,7 @@ export function CompetitiveIntel() {
               </span>
             )}
           </div>
-          {activeTab === 'analyses' && (
+          {activeTab === 'setup' && (
             <motion.div
               layoutId="tab-indicator"
               className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-400"
@@ -1804,69 +1896,9 @@ export function CompetitiveIntel() {
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          className="grid grid-cols-1 lg:grid-cols-4 gap-6"
         >
-          {/* Analysis List */}
-          <div className="space-y-3">
-            <h2 className="text-lg font-semibold text-white mb-4">Recent Analyses</h2>
-            {recentAnalyses.length === 0 ? (
-              <div className="text-center py-8 text-slate-400 bg-slate-800/50 rounded-xl">
-                <ChartBarIcon className="h-12 w-12 mx-auto mb-3 opacity-50" />
-                <p>No analyses yet</p>
-                <p className="text-sm mt-1">Select competitors and generate an analysis</p>
-              </div>
-            ) : (
-              recentAnalyses.map(a => (
-                <motion.div
-                  key={a.id}
-                  whileHover={{ x: 4 }}
-                  onClick={() => loadAnalysis(a.id)}
-                  className={`p-4 rounded-xl cursor-pointer transition-colors ${
-                    currentAnalysis?.id === a.id
-                      ? 'bg-blue-600/20 border border-blue-500/30'
-                      : 'bg-slate-800/50 hover:bg-slate-800'
-                  }`}
-                >
-                  <div className="flex items-center gap-2 mb-2">
-                    <DocumentTextIcon className="h-4 w-4 text-blue-400" />
-                    <span className="text-xs text-slate-400">
-                      {new Date(a.created_at).toLocaleDateString()}
-                    </span>
-                    {a.llm_provider && (
-                      <span className={`px-1.5 py-0.5 text-[10px] font-medium rounded border ${
-                        a.llm_provider === 'anthropic'
-                          ? 'bg-orange-500/15 text-orange-400 border-orange-500/30'
-                          : 'bg-blue-500/15 text-blue-400 border-blue-500/30'
-                      }`}>
-                        {a.llm_provider}
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex flex-wrap gap-1 mb-2">
-                    {a.competitors_analyzed.slice(0, 2).map(name => (
-                      <span
-                        key={name}
-                        className="px-2 py-0.5 text-xs rounded-full bg-slate-700 text-slate-300"
-                      >
-                        {name}
-                      </span>
-                    ))}
-                    {a.competitors_analyzed.length > 2 && (
-                      <span className="px-2 py-0.5 text-xs rounded-full bg-slate-700 text-slate-400">
-                        +{a.competitors_analyzed.length - 2}
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-sm text-slate-300 line-clamp-2">
-                    {a.executive_summary}
-                  </p>
-                </motion.div>
-              ))
-            )}
-          </div>
-
-          {/* Analysis Detail */}
-          <div className="lg:col-span-3">
+          {/* Analysis Detail - Full Width */}
+          <div>
             {currentAnalysis ? (
               <div className="space-y-6">
                 {/* Header with Stats */}
@@ -1945,9 +1977,9 @@ export function CompetitiveIntel() {
                   badge={<span className="px-2 py-0.5 text-xs rounded-full bg-blue-500/20 text-blue-400">Key Insight</span>}
                 >
                   <div className="bg-gradient-to-r from-blue-900/20 to-transparent rounded-lg p-4 border-l-4 border-blue-500">
-                    <p className="text-slate-200 leading-relaxed whitespace-pre-wrap">
-                      {currentAnalysis.executive_summary}
-                    </p>
+                    <div className="text-slate-200 leading-relaxed">
+                      {formatBodyText(currentAnalysis.executive_summary)}
+                    </div>
                   </div>
                 </EnhancedAnalysisSection>
 
@@ -2009,7 +2041,7 @@ export function CompetitiveIntel() {
                     </span>
                   }
                 >
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  <div className="space-y-3">
                     {currentAnalysis.recommendations.slice(0, 7).map((rec, i) => (
                       <RecommendationCard key={i} rec={rec} index={i} />
                     ))}
@@ -2073,11 +2105,102 @@ export function CompetitiveIntel() {
               <div className="flex flex-col items-center justify-center h-full py-16 text-center bg-slate-800/30 rounded-2xl">
                 <ScaleIcon className="h-16 w-16 text-slate-600 mb-4" />
                 <h3 className="text-xl font-semibold text-white mb-2">
-                  Select an Analysis
+                  No Analysis Selected
                 </h3>
-                <p className="text-slate-400 max-w-md">
-                  Choose an analysis from the list or generate a new one by selecting competitors in the Compare tab.
+                <p className="text-slate-400 max-w-md mb-6">
+                  Click "View Analysis" on a competitor card in the Compare tab, or select one from Analysis History.
                 </p>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setActiveTab('compare')}
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-white text-sm font-medium transition-colors"
+                  >
+                    Go to Compare
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('setup')}
+                    className="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-white text-sm font-medium transition-colors"
+                  >
+                    View History
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </motion.div>
+      )}
+
+      {/* Setup / Analysis History Tab */}
+      {activeTab === 'setup' && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="space-y-6"
+        >
+          <div className="bg-slate-800/50 rounded-xl p-6 border border-slate-700/50">
+            <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+              <ChartBarIcon className="h-5 w-5 text-blue-400" />
+              Analysis History
+              {recentAnalyses.length > 0 && (
+                <span className="px-2 py-0.5 text-xs rounded-full bg-blue-500/20 text-blue-400">
+                  {recentAnalyses.length} reports
+                </span>
+              )}
+            </h2>
+            {recentAnalyses.length === 0 ? (
+              <div className="text-center py-8 text-slate-400">
+                <ChartBarIcon className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                <p>No analyses yet</p>
+                <p className="text-sm mt-1">Select competitors in the Compare tab and generate an analysis</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {recentAnalyses.map(a => (
+                  <motion.div
+                    key={a.id}
+                    whileHover={{ scale: 1.02 }}
+                    onClick={async () => {
+                      await loadAnalysis(a.id);
+                      setActiveTab('analyses');
+                    }}
+                    className={`p-4 rounded-xl cursor-pointer transition-all border ${
+                      currentAnalysis?.id === a.id
+                        ? 'bg-blue-600/20 border-blue-500/30'
+                        : 'bg-slate-800/80 border-slate-700/50 hover:border-slate-600'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <DocumentTextIcon className="h-4 w-4 text-blue-400" />
+                        <span className="text-sm text-white font-medium">
+                          {new Date(a.created_at).toLocaleDateString()}
+                        </span>
+                      </div>
+                      {a.llm_provider && (
+                        <span className={`px-1.5 py-0.5 text-[10px] font-medium rounded border ${
+                          a.llm_provider === 'anthropic'
+                            ? 'bg-orange-500/15 text-orange-400 border-orange-500/30'
+                            : 'bg-blue-500/15 text-blue-400 border-blue-500/30'
+                        }`}>
+                          {a.llm_provider}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap gap-1 mb-2">
+                      {a.competitors_analyzed.map(name => (
+                        <span
+                          key={name}
+                          className="px-2 py-0.5 text-xs rounded-full bg-slate-700 text-slate-300"
+                        >
+                          vs {name}
+                        </span>
+                      ))}
+                    </div>
+                    <p className="text-sm text-slate-400 line-clamp-2">
+                      {a.executive_summary}
+                    </p>
+                  </motion.div>
+                ))}
               </div>
             )}
           </div>

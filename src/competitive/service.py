@@ -726,13 +726,27 @@ For each threat, include:
 • Recommended defensive action
 
 ## Strategic Recommendations
-Provide 7 prioritized recommendations for Comcast Business leadership:
-For each recommendation:
-1. [Priority Rank] **Recommendation Title**
-   - Action: Specific action to take
-   - Rationale: Why this matters for the 15% growth target
-   - Success Metric: How to measure success
-   - Complexity: (Low/Medium/High)
+Provide 7 prioritized recommendations for Comcast Business leadership.
+Use EXACTLY this markdown format for each recommendation (do not deviate):
+
+**1. Recommendation Title**
+- **Action:** Specific action to take
+- **Rationale:** Why this matters for the 15% growth target
+- **Success Metric:** How to measure success
+- **Complexity:** Low, Medium, or High
+
+**2. Next Recommendation Title**
+- **Action:** ...
+- **Rationale:** ...
+- **Success Metric:** ...
+- **Complexity:** ...
+
+Important formatting rules for recommendations:
+- Number each recommendation 1-7 with the number inside the bold title
+- Do NOT include "[Priority N]" tags — the number IS the priority
+- Each field (Action, Rationale, Success Metric, Complexity) must be on its own line starting with "- **FieldName:**"
+- Complexity must be one of: Low, Low-Medium, Medium, Medium-High, or High
+- Do NOT use emojis in recommendation titles or complexity values
 
 ## Key Takeaways
 Provide 3-5 bullet points summarizing the most critical insights for leadership.
@@ -847,60 +861,106 @@ Format your responses with clear headers, bullet points, and structured insights
             return content_text
     
     def _extract_section(self, text: str, header: str) -> str:
-        """Extract a section from the analysis text, including ### sub-sections."""
+        """Extract a section from the analysis text, including sub-sections.
+
+        Finds the header line, determines its level (number of # signs),
+        then captures everything until the next header at the same level or higher.
+        """
         import re
-        pattern = rf"#{{1,3}}\s*{header}[^\n]*\n(.*?)(?=\n#{{1,2}}\s[^#]|\Z)"
-        match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
-        return match.group(1).strip() if match else ""
+        lines = text.split('\n')
+        start_idx = None
+        header_level = 0
+        for i, line in enumerate(lines):
+            m = re.match(rf'^(#{{1,3}})\s*{header}', line, re.IGNORECASE)
+            if m:
+                header_level = len(m.group(1))
+                start_idx = i + 1
+                break
+        if start_idx is None:
+            return ""
+
+        end_idx = len(lines)
+        for i in range(start_idx, len(lines)):
+            m = re.match(r'^(#{1,3})\s+', lines[i])
+            if m and len(m.group(1)) <= header_level:
+                end_idx = i
+                break
+
+        return '\n'.join(lines[start_idx:end_idx]).strip()
     
     def _extract_list(self, text: str, header: str) -> List[str]:
-        """Extract a list from a section, grouping multi-line entries."""
+        """Extract a list from a section, grouping multi-line entries.
+
+        Handles multiple LLM output formats:
+          1. ### sub-headers (### Opportunity 1: ...)
+          2. --- separators with **bold titles** (**Opportunity 1: ...**)
+          3. Numbered entries (1. [Priority 1] ...)
+        """
         import re
         section = self._extract_section(text, header)
         if not section:
             return []
 
-        # Split by ### sub-headers (e.g. ### Opportunity 1:, ### 1. [Priority 1])
-        sub_header_pattern = re.compile(r'^###\s+', re.MULTILINE)
+        # Strategy 1: Split by ## or ### sub-headers
+        sub_header_pattern = re.compile(r'^#{2,3}\s+', re.MULTILINE)
         sub_sections = sub_header_pattern.split(section)
-
-        # If we got meaningful sub-sections, group by them
         if len(sub_sections) > 1:
-            items = []
-            for sub in sub_sections[1:]:  # skip text before first ###
-                content = sub.strip()
-                if content:
-                    items.append(content)
+            items = [s.strip() for s in sub_sections[1:] if s.strip()]
             if items:
                 return items
 
-        # Fallback: numbered entries or bullet points
-        numbered_pattern = re.compile(r'^(?:\*\*\[(\d+)\]|\[(\d+)\]|(\d+)[.)]\s*\*?\*?)')
-        lines = section.split('\n')
-        items = []
-        current_item_lines = []
+        # Strategy 2: Split by --- separators (bold-title format)
+        if '\n---\n' in section or '\n---' in section:
+            parts = re.split(r'\n-{3,}\n?', section)
+            items = [p.strip() for p in parts if p.strip()]
+            if len(items) > 1:
+                return items
 
+        # Strategy 3: Split by **bold title** lines that start entries
+        bold_title = re.compile(
+            r'^(?:\*\*(?:Opportunity|Threat|Recommendation)?\s*\d+[.:]|\*\*\d+\.\s*\[Priority)',
+            re.IGNORECASE,
+        )
+        lines = section.split('\n')
+        items: List[str] = []
+        current: List[str] = []
         for line in lines:
             stripped = line.strip()
             if not stripped:
                 continue
+            if bold_title.match(stripped) and current:
+                items.append('\n'.join(current))
+                current = [stripped]
+            elif current:
+                current.append(stripped)
+            else:
+                current.append(stripped)
+        if current:
+            items.append('\n'.join(current))
+        if len(items) > 1:
+            return items
 
-            is_new_entry = numbered_pattern.match(stripped)
-
-            if is_new_entry:
-                if current_item_lines:
-                    items.append('\n'.join(current_item_lines))
-                current_item_lines = [stripped]
-            elif current_item_lines:
-                current_item_lines.append(stripped)
+        # Fallback: numbered entries or bullet points
+        numbered_pattern = re.compile(r'^(?:\*\*\[(\d+)\]|\[(\d+)\]|(\d+)[.)]\s*\*?\*?)')
+        items = []
+        current = []
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if numbered_pattern.match(stripped):
+                if current:
+                    items.append('\n'.join(current))
+                current = [stripped]
+            elif current:
+                current.append(stripped)
             else:
                 if stripped.startswith(('-', '*', '•')):
                     item = stripped.lstrip('-*•').strip()
                     if item:
                         items.append(item)
-
-        if current_item_lines:
-            items.append('\n'.join(current_item_lines))
+        if current:
+            items.append('\n'.join(current))
 
         return items
     

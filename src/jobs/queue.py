@@ -91,6 +91,7 @@ class JobQueue:
     def start_job(self, job_id: str) -> Optional[Job]:
         """Mark a job as started."""
         with self._lock:
+            self._load_queue()
             job = self._jobs.get(job_id)
             if job:
                 job.start()
@@ -100,6 +101,7 @@ class JobQueue:
     def update_progress(self, job_id: str, pct: int, message: Optional[str] = None) -> Optional[Job]:
         """Update job progress."""
         with self._lock:
+            self._load_queue()
             job = self._jobs.get(job_id)
             if job:
                 job.update_progress(pct, message)
@@ -109,6 +111,7 @@ class JobQueue:
     def complete_job(self, job_id: str, result: Optional[dict] = None) -> Optional[Job]:
         """Mark a job as completed."""
         with self._lock:
+            self._load_queue()
             job = self._jobs.get(job_id)
             if job:
                 job.complete(result)
@@ -118,6 +121,7 @@ class JobQueue:
     def fail_job(self, job_id: str, error: str) -> Optional[Job]:
         """Mark a job as failed."""
         with self._lock:
+            self._load_queue()
             job = self._jobs.get(job_id)
             if job:
                 job.fail(error)

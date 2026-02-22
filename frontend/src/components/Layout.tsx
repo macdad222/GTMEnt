@@ -270,7 +270,7 @@ function Logo() {
         </svg>
       </div>
       <div>
-        <p className="text-sm font-semibold text-white">Enterprise Strategy v0.9</p>
+        <p className="text-sm font-semibold text-white">Enterprise Strategy v0.95</p>
         <p className="text-xs text-slate-400">Comcast Business</p>
       </div>
     </div>

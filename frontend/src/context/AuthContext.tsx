@@ -1,5 +1,8 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useRef, useCallback, ReactNode } from 'react';
 import { setToken, clearToken, getToken } from '../utils/api';
+
+const IDLE_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
+const IDLE_EVENTS: (keyof WindowEventMap)[] = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart', 'click'];
 
 interface User {
   id: string;
@@ -30,6 +33,34 @@ const SESSION_KEY = 'gtm_user_session';
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const performLogout = useCallback(() => {
+    setUser(null);
+    clearToken();
+    localStorage.removeItem(SESSION_KEY);
+  }, []);
+
+  // Idle timeout: log out after 15 minutes of no interaction
+  useEffect(() => {
+    if (!user) return;
+
+    const resetTimer = () => {
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+      idleTimerRef.current = setTimeout(() => {
+        console.log('Session expired due to inactivity');
+        performLogout();
+      }, IDLE_TIMEOUT_MS);
+    };
+
+    IDLE_EVENTS.forEach(evt => window.addEventListener(evt, resetTimer, { passive: true }));
+    resetTimer();
+
+    return () => {
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+      IDLE_EVENTS.forEach(evt => window.removeEventListener(evt, resetTimer));
+    };
+  }, [user, performLogout]);
 
   useEffect(() => {
     const token = getToken();
@@ -110,9 +141,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = () => {
-    setUser(null);
-    clearToken();
-    localStorage.removeItem(SESSION_KEY);
+    performLogout();
   };
 
   return (
